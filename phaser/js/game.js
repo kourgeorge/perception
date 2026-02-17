@@ -194,13 +194,19 @@ class InstructionsScene extends Phaser.Scene {
       y += t.height + 12;
     });
 
-    // Name input (optional); if empty, a random name is used
+    // Name input (optional); prefilled with a random name + number, user can change or clear
     this.add.text(w / 2, h - 130, 'Your name (optional)', {
       fontSize: 16, color: '#b0b0c0'
     }).setOrigin(0.5);
+    const randomNameWithNumber = () => {
+      const base = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+      const num = 100 + Math.floor(Math.random() * 900); // 100–999
+      return base + '_' + num;
+    };
+    const defaultName = randomNameWithNumber();
     const inputStyle = 'width:220px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
     const nameDom = this.add.dom(w / 2, h - 95).createFromHTML(
-      '<input type="text" placeholder="Leave empty for random name" maxlength="20" style="' + inputStyle + '">'
+      '<input type="text" placeholder="Leave empty for random name" maxlength="24" value="' + defaultName + '" style="' + inputStyle + '">'
     );
     nameDom.setOrigin(0.5);
 
@@ -212,7 +218,7 @@ class InstructionsScene extends Phaser.Scene {
       const inputEl = nameDom.node && nameDom.node.tagName === 'INPUT' ? nameDom.node : (nameDom.node && nameDom.node.querySelector && nameDom.node.querySelector('input'));
       const rawName = inputEl ? (inputEl.value || '').trim() : '';
       let name = rawName;
-      if (!name) name = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+      if (!name) name = randomNameWithNumber();
       if (nameDom.node) nameDom.node.style.display = 'none';
       this.scene.start('Main', { blockIndex: 0, levelIndex: 0, totalScore: 0, playerName: name });
     };
@@ -289,16 +295,14 @@ class MainScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.arenaGraphics = g;
 
-    // Floor & hot zones
+    // Floor & hot zones (all hot areas same color)
+    const HOT_ZONE_FLOOR = 0x2a3d35;
     const oy = this.hudOffsetY ?? HUD_OFFSET_Y;
     for (let r = PLAYABLE_ROW_MIN; r <= PLAYABLE_ROW_MAX; r++) {
       for (let c = PLAYABLE_COL_MIN; c <= PLAYABLE_COL_MAX; c++) {
         if (MAZE_WALLS.has(`${c},${r}`)) continue;
         const x = c * this.cellSize, y = r * this.cellSize + oy;
-        let fill = 0x1a1525;
-        if (TOP_STRIPE_ROWS.includes(r)) fill = 0x3d2840;
-        else if (BOTTOM_STRIPE_ROWS.includes(r)) fill = 0x2d3040;
-        else if (Math.abs(c - CENTER_COL) <= DISK_RADIUS_COLS && Math.abs(r - CENTER_ROW) <= DISK_RADIUS_ROWS) fill = 0x2a3d35;
+        const fill = isInHotZone(c, r) ? HOT_ZONE_FLOOR : 0x1a1525;
         g.fillStyle(fill, 0.95);
         g.fillRoundedRect(x + 1, y + 1, this.cellSize - 2, this.cellSize - 2, 2);
       }
@@ -347,7 +351,7 @@ class MainScene extends Phaser.Scene {
       const y = y0 + oy;
       const isHigh = type === HIGH_VALUE;
       const radius = isHigh ? this.cellSize * 0.22 : this.cellSize * 0.1;
-      this.pelletGraphics.fillStyle(isHigh ? 0xffdd55 : 0x9090a0, 1);
+      this.pelletGraphics.fillStyle(isHigh ? 0xffb347 : 0x9090a0, 1);
       this.pelletGraphics.fillCircle(x, y, radius);
     });
   }
@@ -429,7 +433,7 @@ class MainScene extends Phaser.Scene {
 
   buildHUD() {
     const w = this.cameras.main.width;
-    this.playerNameText = this.add.text(w - 12, 10, this.playerName || 'Player', { fontSize: 16, color: '#b0b0c0' }).setOrigin(1, 0);
+    this.playerNameText = this.add.text(w - 12, 10, 'Player: ' + (this.playerName || 'Player'), { fontSize: 16, color: '#b0b0c0' }).setOrigin(1, 0);
     this.scoreText = this.add.text(12, 12, 'This level: 0', { fontSize: 18, color: '#e0e0e0' });
     this.totalScoreText = this.add.text(12, 32, 'Total: 0', { fontSize: 18, color: '#ffd54f' });
     this.livesText = this.add.text(12, 52, 'Lives: 3', { fontSize: 18, color: '#e0e0e0' });
@@ -501,7 +505,7 @@ class MainScene extends Phaser.Scene {
     const y = y0 + (this.hudOffsetY ?? HUD_OFFSET_Y);
     const g = this.add.graphics();
     g.setPosition(x, y);
-    g.fillStyle(type === HIGH_VALUE ? 0xffdd55 : 0x9090a0, 0.9);
+    g.fillStyle(type === HIGH_VALUE ? 0xffb347 : 0x9090a0, 0.9);
     g.fillCircle(0, 0, 6);
     this.tweens.add({
       targets: g,
@@ -560,7 +564,13 @@ class MainScene extends Phaser.Scene {
       this.player.frozen = false;
       this.freezeInPlaceUntil = 0;
       this.currentFreezeDurationMs = 0;
+      this.player.invincibleUntil = this.time.now + RESPAWN_INVINCIBILITY_MS;
       // Next freeze ~30 sec from end of this freeze
+      this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
+    }
+    // Resumed from death: schedule next freeze ~30 sec from now
+    if (this.registry.get('resumedFromDeath')) {
+      this.registry.remove('resumedFromDeath');
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
     }
 
@@ -761,6 +771,7 @@ class DeathScene extends Phaser.Scene {
         if (this.lives <= 0) {
           this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName });
         } else {
+          this.registry.set('resumedFromDeath', true);
           this.scene.resume('Main');
         }
       });
