@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Time Game — Pac-Man Foraging</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body {
+      background: #0a0a12;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #game-container {
+      min-width: 800px;
+      min-height: 650px;
+      box-shadow: 0 0 60px rgba(100, 80, 255, 0.15);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container"></div>
+  <div id="error-msg" style="display:none; color:#ff6666; padding:20px; text-align:center;">Error loading game. Check console (F12).</div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    window.addEventListener('error', function(e) {
+      var el = document.getElementById('error-msg');
+      if (el) { el.style.display = 'block'; el.textContent = 'Error: ' + (e.message || 'Check console F12'); }
+    });
+  </script>
+  <script src="js/game.js"></script>
+</body>
+</html>
