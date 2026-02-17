@@ -40,6 +40,40 @@ const RANDOM_NAMES = [
   'Forager', 'Speedy', 'Shadow', 'Bashful', 'Pokey', 'Ghost', 'Spirit'
 ];
 
+// ─── Session CSV logging (registry-backed; download at GameOver) ───────────
+const CSV_COLUMNS = ['event_type', 'timestamp_iso', 'session_id', 'player_name', 'level_index', 'level_score', 'total_score', 'reason', 'freeze_duration_ms', 'in_high_value', 'space_clicks_during_freeze', 'penalty_seconds', 'lives_left'];
+
+function gameLogEvent(registry, eventObj) {
+  const events = registry.get('gameLogEvents');
+  if (events && Array.isArray(events)) events.push(eventObj);
+}
+
+function csvEscape(val) {
+  if (val === undefined || val === null) return '';
+  const s = String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function buildSessionCsv(events) {
+  const rows = [CSV_COLUMNS.join(',')];
+  events.forEach((e) => {
+    const row = CSV_COLUMNS.map((col) => csvEscape(e[col]));
+    rows.push(row.join(','));
+  });
+  return rows.join('\n');
+}
+
+function downloadCsv(csv, filename) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Maze walls from string grid
 const MAZE_WALLS = (() => {
   const set = new Set();
@@ -253,6 +287,30 @@ class MainScene extends Phaser.Scene {
     this.currentFreezeDurationMs = 0;
     this.levelTimeSec = getLevelTimeSec(this.levelIndex);
     this.levelEndTime = this.time.now + this.levelTimeSec * 1000;
+
+    // Session log: init when first level, then always log level_start
+    if (this.levelIndex === 0) {
+      const sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      this.registry.set('gameLogSessionId', sessionId);
+      this.registry.set('gameLogPlayerName', this.playerName);
+      this.registry.set('gameLogEvents', []);
+      gameLogEvent(this.registry, {
+        event_type: 'session_start',
+        timestamp_iso: new Date().toISOString(),
+        session_id: sessionId,
+        player_name: this.playerName
+      });
+    }
+    const sid = this.registry.get('gameLogSessionId');
+    const pname = this.registry.get('gameLogPlayerName') ?? this.playerName;
+    gameLogEvent(this.registry, {
+      event_type: 'level_start',
+      timestamp_iso: new Date().toISOString(),
+      session_id: sid,
+      player_name: pname,
+      level_index: this.levelIndex,
+      total_score: this.totalScore
+    });
 
     const playable = getPlayableCells();
     const start = playable[Math.floor(Math.random() * playable.length)];
@@ -591,12 +649,21 @@ class MainScene extends Phaser.Scene {
     if (time >= this.nextFreezeTime && this.freezeInPlaceUntil <= 0) {
       const inHighValue = isInHotZone(p.col, p.row);
       const durationMs = inHighValue ? FREEZE_DURATION_HIGH_VALUE_MS : FREEZE_DURATION_MS;
+      gameLogEvent(this.registry, {
+        event_type: 'freeze_start',
+        timestamp_iso: new Date().toISOString(),
+        session_id: this.registry.get('gameLogSessionId'),
+        player_name: this.registry.get('gameLogPlayerName'),
+        level_index: this.levelIndex,
+        freeze_duration_ms: durationMs,
+        in_high_value: inHighValue
+      });
       this.player.frozen = true;
       this.freezeInPlaceUntil = 1;
       this.currentFreezeDurationMs = durationMs;
       // nextFreezeTime is set when this freeze ends (~30 sec after unfreeze)
       // Main keeps running so the clock continues; only ghosts/player are stopped via p.frozen
-      this.scene.launch('FreezeOverlay', { durationMs, freezeStartGameTime: time });
+      this.scene.launch('FreezeOverlay', { durationMs, freezeStartGameTime: time, levelIndex: this.levelIndex });
     }
 
     {
@@ -610,6 +677,15 @@ class MainScene extends Phaser.Scene {
       const hit = !p.frozen ? this.checkGhostCollision() : [];
       if (hit.length > 0) {
         p.lives--;
+        gameLogEvent(this.registry, {
+          event_type: 'death',
+          timestamp_iso: new Date().toISOString(),
+          session_id: this.registry.get('gameLogSessionId'),
+          player_name: this.registry.get('gameLogPlayerName'),
+          level_index: this.levelIndex,
+          lives_left: p.lives,
+          total_score: this.totalScore
+        });
         this.cameras.main.shake(200, 0.01);
         this.pendingRespawn = true;
         this.scene.launch('Death', {
@@ -629,6 +705,16 @@ class MainScene extends Phaser.Scene {
     if (levelRemainingMs <= 0) {
       const levelScore = this.player.score;
       const newTotal = this.totalScore + levelScore;
+      gameLogEvent(this.registry, {
+        event_type: 'level_end',
+        timestamp_iso: new Date().toISOString(),
+        session_id: this.registry.get('gameLogSessionId'),
+        player_name: this.registry.get('gameLogPlayerName'),
+        level_index: this.levelIndex,
+        level_score: levelScore,
+        total_score: newTotal,
+        reason: 'time_up'
+      });
       this.scene.start('LevelComplete', {
         levelIndex: this.levelIndex,
         levelScore,
@@ -647,6 +733,16 @@ class MainScene extends Phaser.Scene {
     if (this.pellets.size === 0) {
       const levelScore = this.player.score;
       const newTotal = this.totalScore + levelScore;
+      gameLogEvent(this.registry, {
+        event_type: 'level_end',
+        timestamp_iso: new Date().toISOString(),
+        session_id: this.registry.get('gameLogSessionId'),
+        player_name: this.registry.get('gameLogPlayerName'),
+        level_index: this.levelIndex,
+        level_score: levelScore,
+        total_score: newTotal,
+        reason: 'all_pellets'
+      });
       this.scene.start('LevelComplete', {
         levelIndex: this.levelIndex,
         levelScore,
@@ -686,6 +782,7 @@ class FreezeOverlayScene extends Phaser.Scene {
   init(data) {
     this.durationMs = data.durationMs ?? FREEZE_DURATION_MS;
     this.freezeStartGameTime = data.freezeStartGameTime ?? 0;
+    this.levelIndex = data.levelIndex ?? 0;
   }
 
   create() {
@@ -731,6 +828,15 @@ class FreezeOverlayScene extends Phaser.Scene {
     // ─── SPACE during freeze: only unfreeze after duration + all penalties have passed; else +2s penalty and stay frozen ───
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
       if (pastThreshold) {
+        gameLogEvent(this.registry, {
+          event_type: 'freeze_end',
+          timestamp_iso: new Date().toISOString(),
+          session_id: this.registry.get('gameLogSessionId'),
+          player_name: this.registry.get('gameLogPlayerName'),
+          level_index: this.levelIndex,
+          space_clicks_during_freeze: Math.floor(this.penaltySeconds / PENALTY_PER_EARLY_TAP),
+          penalty_seconds: this.penaltySeconds
+        });
         if (this.penaltySeconds > 0) this.registry.set('freezePenaltySeconds', this.penaltySeconds);
         this.registry.set('freezeJustEnded', true);
         this.scene.stop('FreezeOverlay');
@@ -871,6 +977,29 @@ class GameOverScene extends Phaser.Scene {
     this.add.text(w / 2, 145, this.playerName + '!', { fontSize: 22, color: '#b0b0c0' }).setOrigin(0.5);
     this.add.text(w / 2, 195, 'Total score: ' + this.score, { fontSize: 24, color: '#ffd54f' }).setOrigin(0.5);
     this.add.text(w / 2, 280, 'Close window to exit', { fontSize: 16, color: '#808090' }).setOrigin(0.5);
+
+    // Flush session log to CSV and trigger download
+    const events = this.registry.get('gameLogEvents');
+    const sessionId = this.registry.get('gameLogSessionId');
+    const playerName = this.registry.get('gameLogPlayerName') ?? this.playerName;
+    if (events && Array.isArray(events)) {
+      gameLogEvent(this.registry, {
+        event_type: 'session_end',
+        timestamp_iso: new Date().toISOString(),
+        session_id: sessionId,
+        player_name: playerName,
+        total_score: this.score
+      });
+      const csv = buildSessionCsv(events);
+      const now = new Date();
+      const pad = (n) => (n < 10 ? '0' : '') + n;
+      const dateStr = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+      const filename = 'session_' + (sessionId || 'unknown') + '_' + dateStr + '.csv';
+      downloadCsv(csv, filename);
+    }
+    this.registry.remove('gameLogSessionId');
+    this.registry.remove('gameLogPlayerName');
+    this.registry.remove('gameLogEvents');
   }
 }
 
