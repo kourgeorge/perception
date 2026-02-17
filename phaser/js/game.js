@@ -429,14 +429,14 @@ class MainScene extends Phaser.Scene {
 
   buildHUD() {
     const w = this.cameras.main.width;
-    this.playerNameText = this.add.text(12, 10, this.playerName || 'Player', { fontSize: 16, color: '#b0b0c0' });
-    this.scoreText = this.add.text(12, 30, 'This level: 0', { fontSize: 18, color: '#e0e0e0' });
-    this.totalScoreText = this.add.text(12, 52, 'Total: 0', { fontSize: 18, color: '#ffd54f' });
-    this.livesText = this.add.text(12, 74, 'Lives: 3', { fontSize: 18, color: '#e0e0e0' });
-    this.levelText = this.add.text(12, 96, 'Level 1', { fontSize: 16, color: '#b0b0c0' });
-    this.invText = this.add.text(w - 120, 30, 'Invincible', { fontSize: 16, color: '#ffdd55' }).setVisible(false);
+    this.playerNameText = this.add.text(w - 12, 10, this.playerName || 'Player', { fontSize: 16, color: '#b0b0c0' }).setOrigin(1, 0);
+    this.scoreText = this.add.text(12, 12, 'This level: 0', { fontSize: 18, color: '#e0e0e0' });
+    this.totalScoreText = this.add.text(12, 32, 'Total: 0', { fontSize: 18, color: '#ffd54f' });
+    this.livesText = this.add.text(12, 52, 'Lives: 3', { fontSize: 18, color: '#e0e0e0' });
+    this.levelText = this.add.text(12, 72, 'Level 1', { fontSize: 16, color: '#b0b0c0' });
+    this.invText = this.add.text(w - 120, 32, 'Invincible', { fontSize: 16, color: '#ffdd55' }).setVisible(false);
     // Prominent countdown clock (center-top, large, with background)
-    const clockY = 36;
+    const clockY = 38;
     this.clockBg = this.add.graphics();
     this.clockBg.fillStyle(0x1a1525, 0.95);
     this.clockBg.fillRoundedRect(w / 2 - 72, clockY - 22, 144, 44, 8);
@@ -560,6 +560,8 @@ class MainScene extends Phaser.Scene {
       this.player.frozen = false;
       this.freezeInPlaceUntil = 0;
       this.currentFreezeDurationMs = 0;
+      // Next freeze ~30 sec from end of this freeze
+      this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
     }
 
     if (!this.player.frozen) {
@@ -584,14 +586,14 @@ class MainScene extends Phaser.Scene {
       this.player.frozen = true;
       this.freezeInPlaceUntil = 1;
       this.currentFreezeDurationMs = durationMs;
-      this.nextFreezeTime = time + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
-      this.scene.pause();
+      // nextFreezeTime is set when this freeze ends (~30 sec after unfreeze)
+      // Main keeps running so the clock continues; only ghosts/player are stopped via p.frozen
       this.scene.launch('FreezeOverlay', { durationMs, freezeStartGameTime: time });
     }
 
     {
-      // Ghost movement
-      if (time - this.lastGhostMove >= GHOST_MOVE_DELAY_MS) {
+      // Ghost movement — only when not frozen (entire game stops except clock during freeze)
+      if (!p.frozen && time - this.lastGhostMove >= GHOST_MOVE_DELAY_MS) {
         this.lastGhostMove = time;
         this.moveGhosts();
       }
@@ -669,7 +671,7 @@ class MainScene extends Phaser.Scene {
 // SPACE during freeze is handled ONLY here:
 //   - create(): spaceKey created (line ~664)
 //   - update(): JustDown(spaceKey) at line ~677; if pastThreshold → unfreeze (679-681), else +2s penalty and stay in freeze (682-685)
-// Main scene does NOT handle SPACE (spaceKey at 252 is never used); Main is paused so its update() does not run.
+// Main scene does NOT handle SPACE (spaceKey at 252 is never used). Main keeps running during freeze so the clock continues; only ghosts and player movement are stopped.
 class FreezeOverlayScene extends Phaser.Scene {
   constructor() { super({ key: 'FreezeOverlay' }); }
 
