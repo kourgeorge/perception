@@ -543,10 +543,8 @@ class MainScene extends Phaser.Scene {
       this.pendingRespawn = false;
       const p = this.player;
       if (p.lives <= 0) return;
-      const playable = getPlayableCells();
-      const start = playable[Math.floor(Math.random() * playable.length)];
-      p.col = start[0]; p.row = start[1];
-      const [sx, sy0] = cellToPixel(start[0], start[1]);
+      // Respawn player in the same place where they died (and ghosts stay where they are)
+      const [sx, sy0] = cellToPixel(p.col, p.row);
       const oy = this.hudOffsetY ?? HUD_OFFSET_Y;
       p.playerTargetX = sx; p.playerTargetY = sy0 + oy;
       p.invincibleUntil = time + RESPAWN_INVINCIBILITY_MS;
