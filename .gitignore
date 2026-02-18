@@ -8,3 +8,5 @@ logs/*.json
 .Python
 venv/
 .env
+.phaser-server.pid
+phaser-server.log
