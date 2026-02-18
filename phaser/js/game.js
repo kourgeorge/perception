@@ -706,8 +706,9 @@ class MainScene extends Phaser.Scene {
       }
     }
 
-    this.clockBg.setVisible(true);
-    this.clockText.setVisible(true);
+    const inFreeze = this.freezeInPlaceUntil > 0;
+    this.clockBg.setVisible(!inFreeze);
+    this.clockText.setVisible(!inFreeze);
     if (!this.levelTimerStarted) {
       this.clockText.setText(formatCountdown(this.levelTimeSec * 1000));
       this.clockText.setColor('#ffffff');
