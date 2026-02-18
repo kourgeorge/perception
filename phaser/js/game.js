@@ -21,7 +21,7 @@ const MAZE_ROWS = [
 const HIGH_VALUE = 'high', LOW_VALUE = 'low';
 const POINTS_HIGH = 10, POINTS_LOW = 1;
 const MIN_WAIT_SEC = 3, HIGH_RISK_WAIT_SEC = 5, PENALTY_PER_EARLY_TAP = 2, MAX_WAIT_SEC = 12;
-const PLAYER_MOVE_DELAY_MS = 120, GHOST_MOVE_DELAY_MS = 550;
+const PLAYER_MOVE_DELAY_MS = 70, GHOST_MOVE_DELAY_MS = 550;
 const RESPAWN_INVINCIBILITY_MS = 2000;
 const FREEZE_INTERVAL_SEC = 30;
 const FREEZE_DURATION_MS = 3000;
@@ -552,8 +552,8 @@ class MainScene extends Phaser.Scene {
       targets: p,
       playerTargetX: tx,
       playerTargetY: ty,
-      duration: 80,
-      ease: 'Power2',
+      duration: 65,
+      ease: 'Power2.Out',
       onComplete: () => { p.moving = false; }
     });
 
