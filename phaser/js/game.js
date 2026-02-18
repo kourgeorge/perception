@@ -282,11 +282,13 @@ class MainScene extends Phaser.Scene {
     this.cellSize = CELL_SIZE;
     this.lastPlayerMove = 0;
     this.lastGhostMove = 0;
-    this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
+    // Timer and first freeze start only when user makes first move (not during intro/stats)
+    this.levelTimerStarted = false;
+    this.nextFreezeTime = Number.MAX_SAFE_INTEGER;
     this.freezeInPlaceUntil = 0;
     this.currentFreezeDurationMs = 0;
     this.levelTimeSec = getLevelTimeSec(this.levelIndex);
-    this.levelEndTime = this.time.now + this.levelTimeSec * 1000;
+    this.levelEndTime = null;
 
     // Session log: init when first level, then always log level_start
     if (this.levelIndex === 0) {
@@ -534,6 +536,12 @@ class MainScene extends Phaser.Scene {
   movePlayer(dc, dr) {
     const p = this.player;
     if (p.frozen || p.moving) return;
+    // Start level timer and first freeze countdown on first move
+    if (!this.levelTimerStarted) {
+      this.levelTimerStarted = true;
+      this.levelEndTime = this.time.now + this.levelTimeSec * 1000;
+      this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
+    }
     const nc = p.col + dc, nr = p.row + dr;
     if (isWall(nc, nr) || !inBounds(nc, nr)) return;
     p.col = nc; p.row = nr; p.dir = [dc, dr];
@@ -615,7 +623,7 @@ class MainScene extends Phaser.Scene {
       const penaltySec = this.registry.get('freezePenaltySeconds');
       if (penaltySec != null) {
         this.registry.remove('freezePenaltySeconds');
-        this.levelEndTime -= penaltySec * 1000;
+        if (this.levelTimerStarted && this.levelEndTime != null) this.levelEndTime -= penaltySec * 1000;
       }
       this.player.frozen = false;
       this.freezeInPlaceUntil = 0;
@@ -644,9 +652,9 @@ class MainScene extends Phaser.Scene {
       else if (justDown || (heldDelay && this.cursors.down.isDown)) { this.lastPlayerMove = time; this.movePlayer(0, 1); }
     }
 
-    // Trigger freeze in place (instead of teleport)
+    // Trigger freeze in place (instead of teleport) — only after timer has started
     const p = this.player;
-    if (time >= this.nextFreezeTime && this.freezeInPlaceUntil <= 0) {
+    if (this.levelTimerStarted && time >= this.nextFreezeTime && this.freezeInPlaceUntil <= 0) {
       const inHighValue = isInHotZone(p.col, p.row);
       const durationMs = inHighValue ? FREEZE_DURATION_HIGH_VALUE_MS : FREEZE_DURATION_MS;
       gameLogEvent(this.registry, {
@@ -698,36 +706,41 @@ class MainScene extends Phaser.Scene {
       }
     }
 
-    const levelRemainingMs = this.levelEndTime - time;
     this.clockBg.setVisible(true);
     this.clockText.setVisible(true);
-    this.clockText.setText(formatCountdown(levelRemainingMs));
-    if (levelRemainingMs <= 0) {
-      const levelScore = this.player.score;
-      const newTotal = this.totalScore + levelScore;
-      gameLogEvent(this.registry, {
-        event_type: 'level_end',
-        timestamp_iso: new Date().toISOString(),
-        session_id: this.registry.get('gameLogSessionId'),
-        player_name: this.registry.get('gameLogPlayerName'),
-        level_index: this.levelIndex,
-        level_score: levelScore,
-        total_score: newTotal,
-        reason: 'time_up'
-      });
-      this.scene.start('LevelComplete', {
-        levelIndex: this.levelIndex,
-        levelScore,
-        totalScore: newTotal,
-        nextLevelTimeSec: getLevelTimeSec(this.levelIndex + 1),
-        blocksConfig: this.blocksConfig,
-        blockIndex: this.blockIndex,
-        playerName: this.playerName
-      });
-      return;
+    if (!this.levelTimerStarted) {
+      this.clockText.setText(formatCountdown(this.levelTimeSec * 1000));
+      this.clockText.setColor('#ffffff');
+    } else {
+      const levelRemainingMs = this.levelEndTime - time;
+      this.clockText.setText(formatCountdown(levelRemainingMs));
+      if (levelRemainingMs <= 0) {
+        const levelScore = this.player.score;
+        const newTotal = this.totalScore + levelScore;
+        gameLogEvent(this.registry, {
+          event_type: 'level_end',
+          timestamp_iso: new Date().toISOString(),
+          session_id: this.registry.get('gameLogSessionId'),
+          player_name: this.registry.get('gameLogPlayerName'),
+          level_index: this.levelIndex,
+          level_score: levelScore,
+          total_score: newTotal,
+          reason: 'time_up'
+        });
+        this.scene.start('LevelComplete', {
+          levelIndex: this.levelIndex,
+          levelScore,
+          totalScore: newTotal,
+          nextLevelTimeSec: getLevelTimeSec(this.levelIndex + 1),
+          blocksConfig: this.blocksConfig,
+          blockIndex: this.blockIndex,
+          playerName: this.playerName
+        });
+        return;
+      }
+      if (levelRemainingMs < 30000) this.clockText.setColor('#ff6666');
+      else this.clockText.setColor('#ffffff');
     }
-    if (levelRemainingMs < 30000) this.clockText.setColor('#ff6666');
-    else this.clockText.setColor('#ffffff');
 
     // All pellets collected before time runs out — level complete
     if (this.pellets.size === 0) {
