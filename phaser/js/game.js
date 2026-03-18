@@ -1196,7 +1196,7 @@ class MainScene extends Phaser.Scene {
       this.pendingRespawn = false;
       const p = this.player;
       if (p.lives <= 0) return;
-      // Respawn player in the same place where they died (and ghosts stay where they are)
+      // Respawn player in the same place where they were caught (and ghosts stay where they are)
       const [sx, sy0] = cellToPixel(p.col, p.row);
       const oy = this.hudOffsetY ?? HUD_OFFSET_Y;
       p.playerTargetX = sx; p.playerTargetY = sy0 + oy;
@@ -1220,7 +1220,7 @@ class MainScene extends Phaser.Scene {
       // Next freeze ~30 sec from end of this freeze
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
     }
-    // Resumed from death: schedule next freeze ~30 sec from now
+    // Resumed after losing a life: schedule next freeze ~30 sec from now
     if (this.registry.get('resumedFromDeath')) {
       this.registry.remove('resumedFromDeath');
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
@@ -1575,7 +1575,7 @@ class DeathScene extends Phaser.Scene {
     const overlay = this.add.graphics();
     overlay.fillStyle(0x400000, 0.85);
     overlay.fillRect(0, 0, w, h);
-    this.add.text(w / 2, centerY - responsiveValue(30, 40), 'You died!', {
+    this.add.text(w / 2, centerY - responsiveValue(30, 40), 'You got caught!', {
       fontSize: responsiveValue(36, 46), color: '#ff6666'
     }).setOrigin(0.5);
     this.add.text(w / 2, centerY + responsiveValue(20, 28), this.lives > 0 ? 'Lives left: ' + this.lives : 'No lives left!', {

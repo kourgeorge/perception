@@ -180,7 +180,7 @@ def run_block(
                 last_ghost_time = now
                 move_ghosts(ghosts)
 
-            # Ghost collision: Pac-Man dies (lose a life)
+            # Ghost collision: Pac-Man gets caught (lose a life)
             if now < player.invincible_until:
                 hit = []
             else:
@@ -189,7 +189,7 @@ def run_block(
                 for gid in hit:
                     logger.log_ghost_contact(gid)
                 player.lives -= 1
-                # Blast animation at avatar position, then death overlay
+                # Blast animation at avatar position, then caught overlay
                 cx, cy = cell_to_pixel(player.col, player.row, config.cell_size)
                 blast_frames = 14
                 blast_duration_ms = 480

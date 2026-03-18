@@ -293,7 +293,7 @@ def draw_blast(surface: pygame.Surface, center_x: int, center_y: int, progress: 
 
 
 def draw_death_screen(surface: pygame.Surface, font: pygame.font.Font, lives_remaining: int) -> None:
-    """Visual cue when Pac-Man dies: red flash and 'You died!' with lives left."""
+    """Visual cue when Pac-Man gets caught: red flash and 'You got caught!' with lives left."""
     # Dark red overlay
     overlay = pygame.Surface(surface.get_size())
     overlay.fill((80, 0, 0))
@@ -301,7 +301,7 @@ def draw_death_screen(surface: pygame.Surface, font: pygame.font.Font, lives_rem
     surface.blit(overlay, (0, 0))
     # Message
     title_font = pygame.font.Font(None, 56)
-    msg = title_font.render("You died!", True, (255, 80, 80))
+    msg = title_font.render("You got caught!", True, (255, 80, 80))
     r = msg.get_rect(center=(surface.get_width() // 2, surface.get_height() // 2 - 40))
     surface.blit(msg, r)
     if lives_remaining > 0:

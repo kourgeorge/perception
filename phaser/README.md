@@ -8,7 +8,7 @@ A polished Pac-Man-style foraging task built with **Phaser 3**. Same mechanics a
 - **Polished visuals** — Rounded walls, glowing pellets, pulsing quarantine halo
 - **Ghost animations** — Subtle bobbing and direction-aware eyes
 - **Collect effects** — Quick burst when picking up pellets
-- **Death feedback** — Camera shake and overlay
+- **Caught feedback** — Camera shake and overlay
 - **Responsive HUD** — Score, lives, invincibility indicator
 
 ## Run
