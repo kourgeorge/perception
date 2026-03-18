@@ -24,8 +24,7 @@ if command -v lsof &>/dev/null && lsof -Pi ":$PORT" -sTCP:LISTEN -t &>/dev/null;
   exit 1
 fi
 
-cd "$PHASER_DIR"
-nohup python3 -m http.server "$PORT" > "$LOG_FILE" 2>&1 &
+nohup python3 "$PHASER_DIR/server.py" --port "$PORT" > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 echo "Phaser server started on http://localhost:$PORT (PID $(cat "$PID_FILE"))"
 echo "Log: $LOG_FILE"
