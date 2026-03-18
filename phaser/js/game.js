@@ -47,6 +47,10 @@ const mobileControlsState = {
   ownerSceneKey: null,
   activeDirection: null,
   justPressedDirection: null,
+  swipePointerId: null,
+  swipeStartX: 0,
+  swipeStartY: 0,
+  swipeHandled: false,
   actionHandler: null,
   showDpad: false,
   showAction: false,
@@ -80,45 +84,91 @@ function refreshGameScaleSoon() {
   });
 }
 
+function syncMobileDirectionButtons(direction) {
+  const buttons = mobileControlsState.elements && mobileControlsState.elements.directionButtons ? mobileControlsState.elements.directionButtons : [];
+  buttons.forEach((button) => button.classList.toggle('is-active', button.getAttribute('data-direction') === direction));
+}
+
+function setMobileDirection(direction) {
+  if (!prefersMobileControls() || !direction) return;
+  const state = mobileControlsState;
+  state.activeDirection = null;
+  state.justPressedDirection = null;
+  state.activeDirection = direction;
+  state.justPressedDirection = direction;
+  syncMobileDirectionButtons(direction);
+}
+
 function releaseMobileDirection() {
   const state = mobileControlsState;
   state.activeDirection = null;
   state.justPressedDirection = null;
-  const buttons = state.elements && state.elements.directionButtons ? state.elements.directionButtons : [];
-  buttons.forEach((button) => button.classList.remove('is-active'));
+  state.swipePointerId = null;
+  state.swipeHandled = false;
+  syncMobileDirectionButtons(null);
+}
+
+function shouldIgnoreMobileSwipeTarget(target) {
+  return !!(target && target.closest && target.closest('#mobile-controls, #intro-form-overlay, input, button, label, textarea, select, a'));
 }
 
 function initMobileControls() {
   if (mobileControlsState.initialized || typeof document === 'undefined') return;
   const root = document.getElementById('mobile-controls');
   const actionButton = document.getElementById('mobile-action-button');
-  if (!root || !actionButton) return;
+  const gameContainer = document.getElementById('game-container');
+  if (!root || !actionButton || !gameContainer) return;
 
   const directionButtons = Array.from(root.querySelectorAll('[data-direction]'));
   const state = mobileControlsState;
   state.initialized = true;
-  state.elements = { root, actionButton, directionButtons };
+  state.elements = { root, actionButton, directionButtons, gameContainer };
 
   directionButtons.forEach((button) => {
     const direction = button.getAttribute('data-direction');
     const startDirection = (event) => {
       if (event) event.preventDefault();
       if (!prefersMobileControls()) return;
-      releaseMobileDirection();
-      state.activeDirection = direction;
-      state.justPressedDirection = direction;
-      button.classList.add('is-active');
-    };
-    const stopDirection = (event) => {
-      if (event) event.preventDefault();
-      if (state.activeDirection === direction) state.activeDirection = null;
-      button.classList.remove('is-active');
+      setMobileDirection(direction);
     };
     button.addEventListener('pointerdown', startDirection);
-    button.addEventListener('pointerup', stopDirection);
-    button.addEventListener('pointercancel', stopDirection);
-    button.addEventListener('pointerleave', stopDirection);
   });
+
+  const maybeApplySwipeDirection = (event) => {
+    if (state.swipePointerId !== event.pointerId || state.swipeHandled) return;
+    const dx = event.clientX - state.swipeStartX;
+    const dy = event.clientY - state.swipeStartY;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 18) return;
+    state.swipeHandled = true;
+    const direction = Math.abs(dx) > Math.abs(dy)
+      ? (dx > 0 ? 'right' : 'left')
+      : (dy > 0 ? 'down' : 'up');
+    setMobileDirection(direction);
+  };
+
+  gameContainer.addEventListener('pointerdown', (event) => {
+    if (!prefersMobileControls() || !state.showDpad) return;
+    if (shouldIgnoreMobileSwipeTarget(event.target)) return;
+    state.swipePointerId = event.pointerId;
+    state.swipeStartX = event.clientX;
+    state.swipeStartY = event.clientY;
+    state.swipeHandled = false;
+  });
+  gameContainer.addEventListener('pointermove', (event) => {
+    if (!prefersMobileControls() || !state.showDpad) return;
+    maybeApplySwipeDirection(event);
+  });
+  const finishSwipe = (event) => {
+    if (state.swipePointerId == null) return;
+    if (event && state.swipePointerId === event.pointerId) maybeApplySwipeDirection(event);
+    if (!event || state.swipePointerId === event.pointerId) {
+      state.swipePointerId = null;
+      state.swipeHandled = false;
+    }
+  };
+  gameContainer.addEventListener('pointerup', finishSwipe);
+  gameContainer.addEventListener('pointercancel', finishSwipe);
+  gameContainer.addEventListener('pointerleave', finishSwipe);
 
   actionButton.addEventListener('click', (event) => {
     event.preventDefault();
@@ -126,7 +176,7 @@ function initMobileControls() {
   });
 
   if (typeof window !== 'undefined') {
-    window.addEventListener('pointerup', releaseMobileDirection);
+    window.addEventListener('pointerup', finishSwipe);
     window.addEventListener('blur', releaseMobileDirection);
     window.addEventListener('resize', refreshGameScaleSoon);
   }
@@ -159,6 +209,7 @@ function setMobileControls(sceneKey, options = {}) {
 
   elements.actionButton.textContent = actionLabel;
   elements.actionButton.disabled = !actionHandler;
+  elements.gameContainer.style.touchAction = showDpad ? 'none' : 'auto';
   elements.root.classList.toggle('is-active', enabled);
   elements.root.classList.toggle('show-dpad', enabled && showDpad);
   elements.root.classList.toggle('show-action', enabled && showAction);
