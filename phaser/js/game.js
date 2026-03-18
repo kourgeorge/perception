@@ -1460,19 +1460,18 @@ class FreezeOverlayScene extends Phaser.Scene {
     overlay.fillStyle(0x0d0d18, 0.75);
     overlay.fillRect(0, 0, w, h);
 
-    const totalSec = this.durationMs / 1000;
     this.add.text(w / 2, centerY - responsiveValue(50, 74), 'FREEZE', {
       fontSize: responsiveValue(42, 54), color: '#ffdd55', fontFamily: 'Georgia, serif'
     }).setOrigin(0.5);
-    this.durationText = this.add.text(w / 2, centerY - responsiveValue(-10, 6), `Wait ${totalSec} sec, then press SPACE or tap Continue`, {
+    this.durationText = this.add.text(w / 2, centerY - responsiveValue(-10, 6), 'Wait through the freeze, then press SPACE or tap Continue', {
       fontSize: responsiveValue(22, 28), color: '#e0e0e0',
       align: 'center',
       wordWrap: { width: compact ? w - 180 : w - 120 }
     }).setOrigin(0.5);
-    this.countdownText = this.add.text(w / 2, centerY + responsiveValue(55, 54), '', {
+    this.countdownText = this.add.text(w / 2, centerY + responsiveValue(55, 54), 'No countdown is shown during freeze.', {
       fontSize: responsiveValue(22, 30), color: '#b0b0c0'
     }).setOrigin(0.5);
-    this.pressSpaceText = this.add.text(w / 2, centerY + responsiveValue(95, 102), '', {
+    this.pressSpaceText = this.add.text(w / 2, centerY + responsiveValue(95, 102), 'Continue only when you think the freeze is over.', {
       fontSize: responsiveValue(20, 24), color: '#ffdd55',
       align: 'center',
       wordWrap: { width: compact ? w - 180 : w - 120 }
@@ -1540,7 +1539,7 @@ class FreezeOverlayScene extends Phaser.Scene {
     }
 
     this.penaltySeconds = penaltyAfter;
-    this.earlyPenaltyText.setText(`Too early! +${PENALTY_PER_EARLY_TAP}s penalty (total +${this.penaltySeconds}s). Wait longer.`).setVisible(true);
+    this.earlyPenaltyText.setText('Too early. A penalty was added.').setVisible(true);
   }
 
   update(time) {
@@ -1548,17 +1547,11 @@ class FreezeOverlayScene extends Phaser.Scene {
     const elapsed = time - this.freezeStartGameTime;
     // Required wait = base duration + penalty (each early SPACE adds time you must wait AND reduces level time)
     const requiredWaitMs = this.durationMs + this.penaltySeconds * 1000;
-    const remainingMs = Math.max(0, requiredWaitMs - elapsed);
-    const remainingSec = Math.ceil(remainingMs / 1000);
-    const pastThreshold = elapsed >= requiredWaitMs;
 
     // ─── SPACE during freeze: only unfreeze after duration + all penalties have passed; else +2s penalty and stay frozen ───
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
       this.handleFreezeContinue();
     }
-
-    this.countdownText.setText(remainingSec > 0 ? `${remainingSec} sec remaining` : 'You can continue now');
-    this.pressSpaceText.setText(pastThreshold ? 'Press SPACE or tap Continue' : 'Wait until the countdown ends');
   }
 }
 
