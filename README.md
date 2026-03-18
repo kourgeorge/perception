@@ -37,7 +37,7 @@ Edit `experiment_config.json` to set:
 
 ## Phaser Edition
 
-A polished web version built with **Phaser 3** lives in `phaser/` with smoother visuals and animations. Run a local server from `phaser/` (e.g. `python3 -m http.server 8080`) and open http://localhost:8080. See `phaser/README.md` for details.
+A polished web version built with **Phaser 3** lives in `phaser/` with smoother visuals and animations. Run the bundled server with `python3 phaser/server.py --port 8080` and open http://localhost:8080. See `phaser/README.md` for details.
 
 ## Logs
 
@@ -46,3 +46,8 @@ Session data is written to `logs/` as JSON:
 - `logs/session_<session_id>_<timestamp>.json`
 
 Includes: session metadata, block configs, gate events (teleport/exit times, early tap), pellet collections, ghost contacts, and keypress timestamps.
+
+Phaser server-side session events are also persisted centrally in:
+
+- `logs/phaser_events.sqlite`
+- `logs/phaser_events.csv`
