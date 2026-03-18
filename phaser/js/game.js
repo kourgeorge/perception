@@ -24,8 +24,9 @@ const MIN_WAIT_SEC = 3, HIGH_RISK_WAIT_SEC = 5, PENALTY_PER_EARLY_TAP = 2, MAX_W
 const PLAYER_MOVE_DELAY_MS = 70, GHOST_MOVE_DELAY_MS = 550;
 const RESPAWN_INVINCIBILITY_MS = 2000;
 const FREEZE_INTERVAL_SEC = 30;
-const FREEZE_DURATION_MS = 3000;
-const FREEZE_DURATION_HIGH_VALUE_MS = 6000;
+const FREEZE_DURATIONS_MS = [5000, 10000];
+const FREEZE_WEIGHTS_COLD = [70, 30];
+const FREEZE_WEIGHTS_HOT = [30, 70];
 const COLD_ZONE_PELLET_FRACTION = 0.35;
 // 5 levels: 2 min, then 20 sec less each (120, 100, 80, 60, 40)
 const LEVEL_BASE_TIME_SEC = 120;
@@ -41,11 +42,159 @@ const RANDOM_NAMES = [
 ];
 
 // ─── Session CSV logging (registry-backed; download at GameOver) ───────────
-const CSV_COLUMNS = ['event_type', 'timestamp_iso', 'session_id', 'player_name', 'level_index', 'level_score', 'total_score', 'reason', 'freeze_duration_ms', 'in_high_value', 'space_clicks_during_freeze', 'penalty_seconds', 'lives_left'];
+const CSV_COLUMNS = ['event_id', 'event_seq', 'event_type', 'event_ts', 'session_id', 'player_name', 'level_index', 'score_total', 'lives_left', 'context_id', 'entity_type', 'entity_id', 'x', 'y', 'payload_json'];
+const BACKEND_LOG_ENDPOINT = '/api/logs/events';
+const BACKEND_HEALTH_ENDPOINT = '/api/logs/health';
+const backendLogState = { warnedUnavailable: false, available: null };
+let sessionIdFallbackCounter = 0;
+const GAME_LOG_BASE_KEYS = new Set([
+  'event_id', 'session_id', 'event_seq', 'event_type', 'event', 'event_ts', 'timestamp_iso',
+  'player_name', 'level_index', 'score_total', 'total_score', 'lives_left', 'context_id',
+  'entity_type', 'entity_id', 'x', 'y', 'col', 'row', 'payload'
+]);
 
-function gameLogEvent(registry, eventObj) {
+function getBackendLoggingStatusLabel() {
+  if (backendLogState.available === true) return 'Server logging: online';
+  if (backendLogState.available === false) return 'Server logging: offline';
+  return 'Server logging: checking...';
+}
+
+function probeBackendLogging() {
+  if (typeof fetch !== 'function') {
+    backendLogState.available = false;
+    return Promise.resolve(false);
+  }
+  return fetch(BACKEND_HEALTH_ENDPOINT, { cache: 'no-store' })
+    .then((response) => {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      backendLogState.available = true;
+      backendLogState.warnedUnavailable = false;
+      return true;
+    })
+    .catch((error) => {
+      backendLogState.available = false;
+      if (!backendLogState.warnedUnavailable) {
+        console.warn('Backend logging health check failed.', error);
+        backendLogState.warnedUnavailable = true;
+      }
+      return false;
+    });
+}
+
+function nextGameLogSequence(registry) {
+  const nextSeq = (registry.get('gameLogSequence') ?? 0) + 1;
+  registry.set('gameLogSequence', nextSeq);
+  return nextSeq;
+}
+
+function formatGameLogEventId(sessionId, eventSeq) {
+  return (sessionId || 'sessionless') + ':' + String(eventSeq).padStart(4, '0');
+}
+
+function buildGameLogPayload(eventObj) {
+  const payload = eventObj.payload && typeof eventObj.payload === 'object' && !Array.isArray(eventObj.payload)
+    ? { ...eventObj.payload }
+    : {};
+  Object.keys(eventObj).forEach((key) => {
+    if (GAME_LOG_BASE_KEYS.has(key)) return;
+    const value = eventObj[key];
+    if (value !== undefined) payload[key] = value;
+  });
+  return payload;
+}
+
+function postEventsToBackend(events, options = {}) {
+  const { keepalive = false, preferBeacon = false } = options;
+  if (!events || events.length === 0) return Promise.resolve(false);
+
+  const payload = JSON.stringify({ events });
+  if (preferBeacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    try {
+      const blob = new Blob([payload], { type: 'application/json' });
+      if (navigator.sendBeacon(BACKEND_LOG_ENDPOINT, blob)) return Promise.resolve(true);
+    } catch (error) {
+      console.warn('sendBeacon log upload failed; falling back to fetch.', error);
+    }
+  }
+
+  if (typeof fetch !== 'function') return Promise.resolve(false);
+  return fetch(BACKEND_LOG_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+    keepalive
+  }).then((response) => {
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    backendLogState.available = true;
+    backendLogState.warnedUnavailable = false;
+    return true;
+  }).catch((error) => {
+    backendLogState.available = false;
+    if (!backendLogState.warnedUnavailable) {
+      console.warn('Backend event logging unavailable. Continuing with local session log only.', error);
+      backendLogState.warnedUnavailable = true;
+    }
+    return false;
+  });
+}
+
+function gameLogEvent(registry, eventObj, options = {}) {
+  const sessionId = eventObj.session_id ?? registry.get('gameLogSessionId') ?? null;
+  const eventSeq = eventObj.event_seq ?? nextGameLogSequence(registry);
+  const payload = buildGameLogPayload(eventObj);
+  const enrichedEvent = {
+    session_id: sessionId,
+    event_id: eventObj.event_id ?? formatGameLogEventId(sessionId, eventSeq),
+    event_seq: eventSeq,
+    event_type: eventObj.event_type ?? eventObj.event ?? 'unknown',
+    event_ts: eventObj.event_ts ?? eventObj.timestamp_iso ?? new Date().toISOString(),
+    player_name: eventObj.player_name ?? registry.get('gameLogPlayerName') ?? null,
+    level_index: eventObj.level_index ?? null,
+    score_total: eventObj.score_total ?? eventObj.total_score ?? null,
+    lives_left: eventObj.lives_left ?? null,
+    context_id: eventObj.context_id ?? null,
+    entity_type: eventObj.entity_type ?? null,
+    entity_id: eventObj.entity_id ?? null,
+    x: eventObj.x ?? eventObj.col ?? null,
+    y: eventObj.y ?? eventObj.row ?? null,
+    payload
+  };
   const events = registry.get('gameLogEvents');
-  if (events && Array.isArray(events)) events.push(eventObj);
+  if (events && Array.isArray(events)) events.push(enrichedEvent);
+  if (options.sendToBackend !== false) {
+    postEventsToBackend([enrichedEvent], {
+      keepalive: options.keepalive === true,
+      preferBeacon: options.preferBeacon === true
+    });
+  }
+  return enrichedEvent;
+}
+
+function uploadEntireSessionLog(registry, options = {}) {
+  const events = registry.get('gameLogEvents');
+  if (!events || !Array.isArray(events) || events.length === 0) return Promise.resolve(false);
+  return postEventsToBackend(events, options);
+}
+
+function generateOpaqueId(prefix) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return prefix + '_' + crypto.randomUUID();
+  }
+  sessionIdFallbackCounter += 1;
+  return [
+    prefix,
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2, 10),
+    sessionIdFallbackCounter.toString(36).padStart(4, '0')
+  ].join('_');
+}
+
+function generateSessionId() {
+  return generateOpaqueId('session');
+}
+
+function generateContextId(prefix) {
+  return generateOpaqueId(prefix);
 }
 
 function csvEscape(val) {
@@ -58,7 +207,10 @@ function csvEscape(val) {
 function buildSessionCsv(events) {
   const rows = [CSV_COLUMNS.join(',')];
   events.forEach((e) => {
-    const row = CSV_COLUMNS.map((col) => csvEscape(e[col]));
+    const row = CSV_COLUMNS.map((col) => {
+      if (col === 'payload_json') return csvEscape(JSON.stringify(e.payload ?? {}));
+      return csvEscape(e[col]);
+    });
     rows.push(row.join(','));
   });
   return rows.join('\n');
@@ -129,6 +281,17 @@ function isInHotZone(col, row) {
     (Math.abs(col - CENTER_COL) <= DISK_RADIUS_COLS && Math.abs(row - CENTER_ROW) <= DISK_RADIUS_ROWS);
 }
 
+function pickWeightedFreezeDurationMs(inHotZone) {
+  const weights = inHotZone ? FREEZE_WEIGHTS_HOT : FREEZE_WEIGHTS_COLD;
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < FREEZE_DURATIONS_MS.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return FREEZE_DURATIONS_MS[i];
+  }
+  return FREEZE_DURATIONS_MS[FREEZE_DURATIONS_MS.length - 1];
+}
+
 function getHotZoneCells() {
   const out = [];
   for (let c = 1; c < COLS; c++) {
@@ -190,12 +353,20 @@ function shuffle(arr, count, rng) {
 // ─── Boot ─────────────────────────────────────────────────────────────────
 class BootScene extends Phaser.Scene {
   constructor() { super({ key: 'Boot' }); }
-  create() { this.scene.start('Instructions'); }
+  create() {
+    probeBackendLogging().finally(() => {
+      this.scene.start('Instructions');
+    });
+  }
 }
 
 // ─── Instructions ─────────────────────────────────────────────────────────
 class InstructionsScene extends Phaser.Scene {
   constructor() { super({ key: 'Instructions' }); }
+
+  init(data) {
+    this.playerName = data.playerName ?? '';
+  }
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
@@ -209,13 +380,17 @@ class InstructionsScene extends Phaser.Scene {
     const sub = this.add.text(w / 2, 105, 'Collect pellets. Avoid ghosts.', {
       fontSize: 16, color: '#b0b0c0'
     }).setOrigin(0.5);
+    this.backendStatusText = this.add.text(w / 2, 130, getBackendLoggingStatusLabel(), {
+      fontSize: 14,
+      color: backendLogState.available === false ? '#ff6666' : '#7fd27f'
+    }).setOrigin(0.5);
 
     const lines = [
       '↑↓←→ Move (or hold to move continuously)',
       'Collect as many pellets as you can before time runs out',
       '5 levels: Level 1 = 2 min, each level 20 sec less. Score adds up.',
       'High-value zones (gold) worth more. Avoid ghosts (3 lives).',
-      'Freeze: entire screen pauses. Wait 3 or 6 sec (longer in high-value areas), then press SPACE to continue.',
+      'Freeze: entire screen pauses. Wait 5 or 10 sec (longer freezes more likely in high-value areas), then press SPACE to continue.',
       'Pressing SPACE before the wait adds +2s penalty and keeps you in freeze. Clock turns red under 30s.'
     ];
     const wrapWidth = w - 60;
@@ -237,7 +412,7 @@ class InstructionsScene extends Phaser.Scene {
       const num = 100 + Math.floor(Math.random() * 900); // 100–999
       return base + '_' + num;
     };
-    const defaultName = randomNameWithNumber();
+    const defaultName = this.playerName || randomNameWithNumber();
     const inputStyle = 'width:220px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
     const nameDom = this.add.dom(w / 2, h - 95).createFromHTML(
       '<input type="text" placeholder="Leave empty for random name" maxlength="24" value="' + defaultName + '" style="' + inputStyle + '">'
@@ -253,10 +428,17 @@ class InstructionsScene extends Phaser.Scene {
       const rawName = inputEl ? (inputEl.value || '').trim() : '';
       let name = rawName;
       if (!name) name = randomNameWithNumber();
+      this.registry.set('lastPlayerName', name);
       if (nameDom.node) nameDom.node.style.display = 'none';
       this.scene.start('Main', { blockIndex: 0, levelIndex: 0, totalScore: 0, playerName: name });
     };
     this.input.keyboard.once('keydown-SPACE', startGame);
+  }
+
+  update() {
+    if (!this.backendStatusText) return;
+    this.backendStatusText.setText(getBackendLoggingStatusLabel());
+    this.backendStatusText.setColor(backendLogState.available === false ? '#ff6666' : '#7fd27f');
   }
 }
 
@@ -279,6 +461,7 @@ class MainScene extends Phaser.Scene {
   create() {
     const bc = this.blocksConfig[this.blockIndex];
     this.blockConfig = { left: bc.left_gate_row, right: bc.right_gate_row };
+    this.sessionExitInProgress = false;
     this.cellSize = CELL_SIZE;
     this.lastPlayerMove = 0;
     this.lastGhostMove = 0;
@@ -292,9 +475,10 @@ class MainScene extends Phaser.Scene {
 
     // Session log: init when first level, then always log level_start
     if (this.levelIndex === 0) {
-      const sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      const sessionId = generateSessionId();
       this.registry.set('gameLogSessionId', sessionId);
       this.registry.set('gameLogPlayerName', this.playerName);
+      this.registry.set('gameLogSequence', 0);
       this.registry.set('gameLogEvents', []);
       gameLogEvent(this.registry, {
         event_type: 'session_start',
@@ -493,12 +677,12 @@ class MainScene extends Phaser.Scene {
 
   buildHUD() {
     const w = this.cameras.main.width;
-    this.playerNameText = this.add.text(w - 12, 10, 'Player: ' + (this.playerName || 'Player'), { fontSize: 16, color: '#b0b0c0' }).setOrigin(1, 0);
-    this.scoreText = this.add.text(12, 12, 'This level: 0', { fontSize: 18, color: '#e0e0e0' });
-    this.totalScoreText = this.add.text(12, 32, 'Total: 0', { fontSize: 18, color: '#ffd54f' });
+    this.playerNameText = this.add.text(w - 12, 10, this.playerName || 'Player', { fontSize: 16, color: '#b0b0c0' }).setOrigin(1, 0);
+    this.totalScoreText = this.add.text(w - 12, 38, '0', { fontSize: 32, color: '#ffd54f', fontFamily: 'Georgia, serif' }).setOrigin(1, 0);
+    this.scoreText = this.add.text(12, 12, 'This level: 0', { fontSize: 26, color: '#ffd54f', fontFamily: 'Georgia, serif' });
     this.livesText = this.add.text(12, 52, 'Lives: 3', { fontSize: 18, color: '#e0e0e0' });
     this.levelText = this.add.text(12, 72, 'Level 1', { fontSize: 16, color: '#b0b0c0' });
-    this.invText = this.add.text(w - 120, 32, 'Invincible', { fontSize: 16, color: '#ffdd55' }).setVisible(false);
+    this.invText = this.add.text(w - 12, 76, 'Invincible', { fontSize: 14, color: '#ffdd55' }).setOrigin(1, 0).setVisible(false);
     // Prominent countdown clock (center-top, large, with background)
     const clockY = 38;
     this.clockBg = this.add.graphics();
@@ -510,6 +694,24 @@ class MainScene extends Phaser.Scene {
       fontSize: 28, color: '#ffffff', fontFamily: 'monospace',
       stroke: '#0d0d18', strokeThickness: 2
     }).setOrigin(0.5);
+
+    this.exitButtonBg = this.add.rectangle(w / 2, 76, 92, 30, 0x6d2430, 0.95)
+      .setStrokeStyle(2, 0xff8a80, 0.9)
+      .setInteractive({ useHandCursor: true });
+    this.exitButtonText = this.add.text(w / 2, 76, 'Exit Game', {
+      fontSize: 15,
+      color: '#fff1f1'
+    }).setOrigin(0.5);
+
+    this.exitButtonBg.on('pointerover', () => {
+      this.exitButtonBg.setFillStyle(0x8b2d3d, 0.98);
+    });
+    this.exitButtonBg.on('pointerout', () => {
+      this.exitButtonBg.setFillStyle(0x6d2430, 0.95);
+    });
+    this.exitButtonBg.on('pointerdown', () => {
+      this.endSessionEarly();
+    });
   }
 
   buildFreezeHalo() {
@@ -535,15 +737,46 @@ class MainScene extends Phaser.Scene {
 
   movePlayer(dc, dr) {
     const p = this.player;
-    if (p.frozen || p.moving) return;
+    const fromCol = p.col;
+    const fromRow = p.row;
+    if (p.frozen || p.moving) {
+      return {
+        moved: false,
+        blocked_reason: p.frozen ? 'frozen' : 'already_moving',
+        started_level_timer: false,
+        from_x: fromCol,
+        from_y: fromRow,
+        to_x: fromCol,
+        to_y: fromRow,
+        pellet_collected: false,
+        pellet_type: null,
+        points_gained: 0
+      };
+    }
     // Start level timer and first freeze countdown on first move
+    let startedLevelTimer = false;
     if (!this.levelTimerStarted) {
       this.levelTimerStarted = true;
       this.levelEndTime = this.time.now + this.levelTimeSec * 1000;
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
+      startedLevelTimer = true;
     }
     const nc = p.col + dc, nr = p.row + dr;
-    if (isWall(nc, nr) || !inBounds(nc, nr)) return;
+    const inBoundsTarget = inBounds(nc, nr);
+    if (!inBoundsTarget || isWall(nc, nr)) {
+      return {
+        moved: false,
+        blocked_reason: inBoundsTarget ? 'wall' : 'out_of_bounds',
+        started_level_timer: startedLevelTimer,
+        from_x: fromCol,
+        from_y: fromRow,
+        to_x: nc,
+        to_y: nr,
+        pellet_collected: false,
+        pellet_type: null,
+        points_gained: 0
+      };
+    }
     p.col = nc; p.row = nr; p.dir = [dc, dr];
     p.moving = true;
     const [tx, ty0] = cellToPixel(nc, nr);
@@ -558,12 +791,76 @@ class MainScene extends Phaser.Scene {
     });
 
     const key = `${nc},${nr}`;
+    let pelletCollected = false;
+    let pelletType = null;
+    let pointsGained = 0;
     if (this.pellets.has(key)) {
       const type = this.pellets.get(key);
+      const points = type === HIGH_VALUE ? POINTS_HIGH : POINTS_LOW;
       this.pellets.delete(key);
-      p.score += type === HIGH_VALUE ? POINTS_HIGH : POINTS_LOW;
+      p.score += points;
+      pelletCollected = true;
+      pelletType = type;
+      pointsGained = points;
+      gameLogEvent(this.registry, {
+        event_type: 'pellet_collected',
+        level_index: this.levelIndex,
+        score_total: this.totalScore + p.score,
+        lives_left: p.lives,
+        entity_type: 'pellet',
+        entity_id: key,
+        x: nc,
+        y: nr,
+        payload: {
+          pellet_type: type,
+          points,
+          level_score_after: p.score
+        }
+      });
       this.addCollectEffect(nc, nr, type);
     }
+    return {
+      moved: true,
+      blocked_reason: null,
+      started_level_timer: startedLevelTimer,
+      from_x: fromCol,
+      from_y: fromRow,
+      to_x: nc,
+      to_y: nr,
+      pellet_collected: pelletCollected,
+      pellet_type: pelletType,
+      points_gained: pointsGained
+    };
+  }
+
+  logArrowPress(eventType, dc, dr, outcome) {
+    const p = this.player;
+    gameLogEvent(this.registry, {
+      event_type: eventType,
+      level_index: this.levelIndex,
+      score_total: this.totalScore + p.score,
+      lives_left: p.lives,
+      entity_type: 'player',
+      entity_id: this.playerName || 'player',
+      x: outcome.to_x,
+      y: outcome.to_y,
+      payload: {
+        direction: { dx: dc, dy: dr },
+        moved: outcome.moved,
+        blocked_reason: outcome.blocked_reason,
+        started_level_timer: outcome.started_level_timer,
+        level_timer_started: this.levelTimerStarted,
+        was_frozen: p.frozen,
+        was_already_moving: outcome.blocked_reason === 'already_moving',
+        from_x: outcome.from_x,
+        from_y: outcome.from_y,
+        to_x: outcome.to_x,
+        to_y: outcome.to_y,
+        pellet_collected: outcome.pellet_collected,
+        pellet_type: outcome.pellet_type,
+        points_gained: outcome.points_gained
+      }
+    });
   }
 
   addCollectEffect(col, row, type) {
@@ -604,6 +901,29 @@ class MainScene extends Phaser.Scene {
     return this.ghosts.filter(g => !g.removed && g.col === p.col && g.row === p.row).map(g => g.id);
   }
 
+  endSessionEarly() {
+    if (this.sessionExitInProgress) return;
+    this.sessionExitInProgress = true;
+
+    const finalScore = this.totalScore + this.player.score;
+    gameLogEvent(this.registry, {
+      event_type: 'level_end',
+      timestamp_iso: new Date().toISOString(),
+      session_id: this.registry.get('gameLogSessionId'),
+      player_name: this.registry.get('gameLogPlayerName'),
+      level_index: this.levelIndex,
+      level_score: this.player.score,
+      total_score: finalScore,
+      reason: 'player_exit'
+    });
+
+    this.scene.start('GameOver', {
+      score: finalScore,
+      playerName: this.playerName,
+      reason: 'player_exit'
+    });
+  }
+
   update(time, delta) {
     if (this.pendingRespawn) {
       this.pendingRespawn = false;
@@ -620,6 +940,7 @@ class MainScene extends Phaser.Scene {
     // Freeze just ended (player pressed SPACE): clear state and apply penalty if early
     if (this.registry.get('freezeJustEnded')) {
       this.registry.remove('freezeJustEnded');
+      this.registry.remove('activeFreezeContextId');
       const penaltySec = this.registry.get('freezePenaltySeconds');
       if (penaltySec != null) {
         this.registry.remove('freezePenaltySeconds');
@@ -638,40 +959,74 @@ class MainScene extends Phaser.Scene {
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
     }
 
-    if (!this.player.frozen) {
-      // Player movement: immediate on keypress, or one cell per delay when held
+    {
+      // Player movement: discrete keypresses are logged; held input continues movement without extra press events.
       const p = this.player;
       const justLeft = Phaser.Input.Keyboard.JustDown(this.cursors.left);
       const justRight = Phaser.Input.Keyboard.JustDown(this.cursors.right);
       const justUp = Phaser.Input.Keyboard.JustDown(this.cursors.up);
       const justDown = Phaser.Input.Keyboard.JustDown(this.cursors.down);
-      const heldDelay = !p.moving && (time - this.lastPlayerMove >= PLAYER_MOVE_DELAY_MS);
-      if (justLeft || (heldDelay && this.cursors.left.isDown)) { this.lastPlayerMove = time; this.movePlayer(-1, 0); }
-      else if (justRight || (heldDelay && this.cursors.right.isDown)) { this.lastPlayerMove = time; this.movePlayer(1, 0); }
-      else if (justUp || (heldDelay && this.cursors.up.isDown)) { this.lastPlayerMove = time; this.movePlayer(0, -1); }
-      else if (justDown || (heldDelay && this.cursors.down.isDown)) { this.lastPlayerMove = time; this.movePlayer(0, 1); }
+      const heldDelay = !p.frozen && !p.moving && (time - this.lastPlayerMove >= PLAYER_MOVE_DELAY_MS);
+      if (justLeft) {
+        this.lastPlayerMove = time;
+        this.logArrowPress('arrow_left_press', -1, 0, this.movePlayer(-1, 0));
+      } else if (justRight) {
+        this.lastPlayerMove = time;
+        this.logArrowPress('arrow_right_press', 1, 0, this.movePlayer(1, 0));
+      } else if (justUp) {
+        this.lastPlayerMove = time;
+        this.logArrowPress('arrow_up_press', 0, -1, this.movePlayer(0, -1));
+      } else if (justDown) {
+        this.lastPlayerMove = time;
+        this.logArrowPress('arrow_down_press', 0, 1, this.movePlayer(0, 1));
+      } else if (heldDelay && this.cursors.left.isDown) {
+        this.lastPlayerMove = time;
+        this.movePlayer(-1, 0);
+      } else if (heldDelay && this.cursors.right.isDown) {
+        this.lastPlayerMove = time;
+        this.movePlayer(1, 0);
+      } else if (heldDelay && this.cursors.up.isDown) {
+        this.lastPlayerMove = time;
+        this.movePlayer(0, -1);
+      } else if (heldDelay && this.cursors.down.isDown) {
+        this.lastPlayerMove = time;
+        this.movePlayer(0, 1);
+      }
     }
 
     // Trigger freeze in place (instead of teleport) — only after timer has started
     const p = this.player;
     if (this.levelTimerStarted && time >= this.nextFreezeTime && this.freezeInPlaceUntil <= 0) {
-      const inHighValue = isInHotZone(p.col, p.row);
-      const durationMs = inHighValue ? FREEZE_DURATION_HIGH_VALUE_MS : FREEZE_DURATION_MS;
+      const inHotZone = isInHotZone(p.col, p.row);
+      const durationMs = pickWeightedFreezeDurationMs(inHotZone);
+      const freezeContextId = generateContextId('freeze');
+      this.registry.set('activeFreezeContextId', freezeContextId);
       gameLogEvent(this.registry, {
         event_type: 'freeze_start',
-        timestamp_iso: new Date().toISOString(),
-        session_id: this.registry.get('gameLogSessionId'),
-        player_name: this.registry.get('gameLogPlayerName'),
         level_index: this.levelIndex,
-        freeze_duration_ms: durationMs,
-        in_high_value: inHighValue
+        score_total: this.totalScore + p.score,
+        lives_left: p.lives,
+        context_id: freezeContextId,
+        x: p.col,
+        y: p.row,
+        payload: {
+          planned_freeze_ms: durationMs,
+          in_high_value: inHotZone
+        }
       });
       this.player.frozen = true;
       this.freezeInPlaceUntil = 1;
       this.currentFreezeDurationMs = durationMs;
       // nextFreezeTime is set when this freeze ends (~30 sec after unfreeze)
       // Main keeps running so the clock continues; only ghosts/player are stopped via p.frozen
-      this.scene.launch('FreezeOverlay', { durationMs, freezeStartGameTime: time, levelIndex: this.levelIndex });
+      this.scene.launch('FreezeOverlay', {
+        durationMs,
+        freezeStartGameTime: time,
+        levelIndex: this.levelIndex,
+        freezeContextId,
+        scoreTotalAtFreezeStart: this.totalScore + p.score,
+        livesLeft: p.lives
+      });
     }
 
     {
@@ -684,15 +1039,32 @@ class MainScene extends Phaser.Scene {
       // Ghost collision (no damage while frozen)
       const hit = !p.frozen ? this.checkGhostCollision() : [];
       if (hit.length > 0) {
+        const collidedGhosts = this.ghosts
+          .filter((ghost) => hit.includes(ghost.id))
+          .map((ghost) => ({
+            ghost_id: ghost.id,
+            x: ghost.col,
+            y: ghost.row
+          }));
+        const livesBeforeDeath = p.lives;
         p.lives--;
         gameLogEvent(this.registry, {
           event_type: 'death',
-          timestamp_iso: new Date().toISOString(),
-          session_id: this.registry.get('gameLogSessionId'),
-          player_name: this.registry.get('gameLogPlayerName'),
           level_index: this.levelIndex,
           lives_left: p.lives,
-          total_score: this.totalScore
+          score_total: this.totalScore + p.score,
+          entity_type: 'player',
+          entity_id: this.playerName || 'player',
+          x: p.col,
+          y: p.row,
+          payload: {
+            level_score: p.score,
+            lives_before: livesBeforeDeath,
+            lives_after: p.lives,
+            collided_ghost_ids: hit,
+            collided_ghosts: collidedGhosts,
+            collision_count: hit.length
+          }
         });
         this.cameras.main.shake(200, 0.01);
         this.pendingRespawn = true;
@@ -794,15 +1166,19 @@ class FreezeOverlayScene extends Phaser.Scene {
   constructor() { super({ key: 'FreezeOverlay' }); }
 
   init(data) {
-    this.durationMs = data.durationMs ?? FREEZE_DURATION_MS;
+    this.durationMs = data.durationMs ?? FREEZE_DURATIONS_MS[0];
     this.freezeStartGameTime = data.freezeStartGameTime ?? 0;
     this.levelIndex = data.levelIndex ?? 0;
+    this.freezeContextId = data.freezeContextId ?? null;
+    this.scoreTotalAtFreezeStart = data.scoreTotalAtFreezeStart ?? 0;
+    this.livesLeft = data.livesLeft ?? 0;
   }
 
   create() {
     const w = this.cameras.main.width;
     const h = this.cameras.main.height;
     this.penaltySeconds = 0;
+    this.pressCount = 0;
 
     // Semi-transparent overlay over entire board — entire screen is paused
     const overlay = this.add.graphics();
@@ -841,22 +1217,45 @@ class FreezeOverlayScene extends Phaser.Scene {
 
     // ─── SPACE during freeze: only unfreeze after duration + all penalties have passed; else +2s penalty and stay frozen ───
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      const penaltyBefore = this.penaltySeconds;
+      const penaltyAfter = pastThreshold ? penaltyBefore : penaltyBefore + PENALTY_PER_EARLY_TAP;
+      this.pressCount += 1;
+      gameLogEvent(this.registry, {
+        event_type: 'freeze_space_press',
+        level_index: this.levelIndex,
+        score_total: this.scoreTotalAtFreezeStart,
+        lives_left: this.livesLeft,
+        context_id: this.freezeContextId,
+        payload: {
+          press_index: this.pressCount,
+          elapsed_freeze_ms: Math.max(0, Math.round(elapsed)),
+          required_wait_ms: requiredWaitMs,
+          was_early: !pastThreshold,
+          penalty_seconds_before: penaltyBefore,
+          penalty_seconds_after: penaltyAfter,
+          unfreezes_game: pastThreshold
+        }
+      });
       if (pastThreshold) {
         gameLogEvent(this.registry, {
           event_type: 'freeze_end',
-          timestamp_iso: new Date().toISOString(),
-          session_id: this.registry.get('gameLogSessionId'),
-          player_name: this.registry.get('gameLogPlayerName'),
           level_index: this.levelIndex,
-          space_clicks_during_freeze: Math.floor(this.penaltySeconds / PENALTY_PER_EARLY_TAP),
-          penalty_seconds: this.penaltySeconds
+          score_total: this.scoreTotalAtFreezeStart,
+          lives_left: this.livesLeft,
+          context_id: this.freezeContextId,
+          payload: {
+            planned_freeze_ms: this.durationMs,
+            actual_wait_ms: Math.max(0, Math.round(elapsed)),
+            final_penalty_seconds: this.penaltySeconds,
+            space_press_count: this.pressCount
+          }
         });
         if (this.penaltySeconds > 0) this.registry.set('freezePenaltySeconds', this.penaltySeconds);
         this.registry.set('freezeJustEnded', true);
         this.scene.stop('FreezeOverlay');
         this.scene.resume('Main');
       } else {
-        this.penaltySeconds += PENALTY_PER_EARLY_TAP;
+        this.penaltySeconds = penaltyAfter;
         this.earlyPenaltyText.setText(`Too early! +${PENALTY_PER_EARLY_TAP}s penalty (total +${this.penaltySeconds}s). Wait longer.`).setVisible(true);
       }
     }
@@ -982,15 +1381,22 @@ class GameOverScene extends Phaser.Scene {
   init(data) {
     this.score = data.score ?? 0;
     this.playerName = data.playerName ?? 'Player';
+    this.reason = data.reason ?? 'completed';
   }
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
+    const endedEarly = this.reason === 'player_exit';
     this.add.rectangle(0, 0, w, h, 0x0d0d18).setOrigin(0);
-    this.add.text(w / 2, 100, 'Session complete', { fontSize: 26, color: '#e0e0e0' }).setOrigin(0.5);
+    this.add.text(w / 2, 100, endedEarly ? 'Session ended early' : 'Session complete', { fontSize: 26, color: '#e0e0e0' }).setOrigin(0.5);
     this.add.text(w / 2, 145, this.playerName + '!', { fontSize: 22, color: '#b0b0c0' }).setOrigin(0.5);
     this.add.text(w / 2, 195, 'Total score: ' + this.score, { fontSize: 24, color: '#ffd54f' }).setOrigin(0.5);
-    this.add.text(w / 2, 280, 'Close window to exit', { fontSize: 16, color: '#808090' }).setOrigin(0.5);
+    this.add.text(w / 2, 260, 'Play again?', { fontSize: 20, color: '#b0b0c0' }).setOrigin(0.5);
+    this.add.text(w / 2, 295, 'SPACE — Yes  |  Close tab to exit', { fontSize: 16, color: '#808090' }).setOrigin(0.5);
+
+    this.input.keyboard.once('keydown-SPACE', () => {
+      this.scene.start('Instructions', { playerName: this.playerName });
+    });
 
     // Flush session log to CSV and trigger download
     const events = this.registry.get('gameLogEvents');
@@ -1002,8 +1408,10 @@ class GameOverScene extends Phaser.Scene {
         timestamp_iso: new Date().toISOString(),
         session_id: sessionId,
         player_name: playerName,
-        total_score: this.score
-      });
+        total_score: this.score,
+        reason: this.reason
+      }, { keepalive: true, preferBeacon: true });
+      uploadEntireSessionLog(this.registry, { keepalive: true, preferBeacon: true });
       const csv = buildSessionCsv(events);
       const now = new Date();
       const pad = (n) => (n < 10 ? '0' : '') + n;
@@ -1014,6 +1422,7 @@ class GameOverScene extends Phaser.Scene {
     this.registry.remove('gameLogSessionId');
     this.registry.remove('gameLogPlayerName');
     this.registry.remove('gameLogEvents');
+    this.registry.remove('gameLogSequence');
   }
 }
 
