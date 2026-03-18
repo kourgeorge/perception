@@ -309,8 +309,7 @@ function hideIntroFormOverlay() {
   elements.root.setAttribute('aria-hidden', 'true');
 }
 
-// ─── Session CSV logging (registry-backed; download at GameOver) ───────────
-const CSV_COLUMNS = ['event_id', 'event_seq', 'event_type', 'event_ts', 'session_id', 'player_name', 'level_index', 'score_total', 'lives_left', 'context_id', 'entity_type', 'entity_id', 'x', 'y', 'payload_json'];
+// ─── Session logging (registry-backed; flushed to backend at GameOver) ─────
 const BACKEND_LOG_ENDPOINT = '/api/logs/events';
 const BACKEND_HEALTH_ENDPOINT = '/api/logs/health';
 const backendLogState = { warnedUnavailable: false, available: null };
@@ -463,35 +462,6 @@ function generateSessionId() {
 
 function generateContextId(prefix) {
   return generateOpaqueId(prefix);
-}
-
-function csvEscape(val) {
-  if (val === undefined || val === null) return '';
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
-  return s;
-}
-
-function buildSessionCsv(events) {
-  const rows = [CSV_COLUMNS.join(',')];
-  events.forEach((e) => {
-    const row = CSV_COLUMNS.map((col) => {
-      if (col === 'payload_json') return csvEscape(JSON.stringify(e.payload ?? {}));
-      return csvEscape(e[col]);
-    });
-    rows.push(row.join(','));
-  });
-  return rows.join('\n');
-}
-
-function downloadCsv(csv, filename) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // Maze walls from string grid
@@ -1841,7 +1811,7 @@ class GameOverScene extends Phaser.Scene {
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
 
-    // Flush session log to CSV and trigger download
+    // Flush session log to the backend
     const events = this.registry.get('gameLogEvents');
     const sessionId = this.registry.get('gameLogSessionId');
     const playerName = this.registry.get('gameLogPlayerName') ?? this.playerName;
@@ -1859,12 +1829,6 @@ class GameOverScene extends Phaser.Scene {
         }
       }, { keepalive: true, preferBeacon: true });
       uploadEntireSessionLog(this.registry, { keepalive: true, preferBeacon: true });
-      const csv = buildSessionCsv(events);
-      const now = new Date();
-      const pad = (n) => (n < 10 ? '0' : '') + n;
-      const dateStr = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
-      const filename = 'session_' + (sessionId || 'unknown') + '_' + dateStr + '.csv';
-      downloadCsv(csv, filename);
     }
     this.registry.remove('gameLogSessionId');
     this.registry.remove('gameLogPlayerName');
