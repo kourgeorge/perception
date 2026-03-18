@@ -589,6 +589,7 @@ class InstructionsScene extends Phaser.Scene {
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
     const compact = usesCompactScreenLayout();
+    const compactPromptY = h - 158;
     const bg = this.add.graphics();
     bg.fillStyle(0x0d0d18, 1);
     bg.fillRect(0, 0, w, h);
@@ -610,8 +611,8 @@ class InstructionsScene extends Phaser.Scene {
           'Collect pellets before time runs out.',
           'Five levels. Each one gets shorter.',
           'Gold zones are worth more. Avoid ghosts.',
-          'Freeze: wait, then press SPACE or tap Continue.',
-          'Tapping early adds +2 seconds.'
+          'Freeze: wait, then tap Continue.',
+          'Early taps add +2 seconds.'
         ]
       : [
           '↑↓←→ Move, or use the mobile pad on touch screens',
@@ -621,14 +622,14 @@ class InstructionsScene extends Phaser.Scene {
           'Freeze: entire screen pauses. Wait 5 or 10 sec, then press SPACE or tap Continue.',
           'Pressing SPACE or tapping too early adds +2s penalty and keeps you frozen. Clock turns red under 30s.'
         ];
-    const wrapWidth = compact ? w - 140 : w - 60;
-    let y = compact ? 152 : 165;
+    const wrapWidth = compact ? w - 150 : w - 60;
+    let y = compact ? 144 : 165;
     lines.forEach((line) => {
       const t = this.add.text(w / 2, y, line, {
         fontSize: responsiveValue(15, 20), color: '#c0c0d0', align: 'center',
         wordWrap: { width: wrapWidth }, lineSpacing: compact ? 2 : 4
       }).setOrigin(0.5, 0);
-      y += t.height + (compact ? 8 : 12);
+      y += t.height + (compact ? 6 : 12);
     });
 
     const randomNameWithNumber = () => {
@@ -647,9 +648,10 @@ class InstructionsScene extends Phaser.Scene {
     const ageInputEl = introForm ? introForm.ageInput : null;
     const ageErrorEl = introForm ? introForm.error : null;
 
-    this.add.text(w / 2, h - responsiveValue(12, 18), 'Press SPACE or tap Start', {
-      fontSize: responsiveValue(20, 24), color: '#ffd54f'
-    }).setOrigin(0.5, 1);
+    this.add.text(w / 2, compact ? compactPromptY : h - 12, 'Press SPACE or tap Start', {
+      fontSize: responsiveValue(20, 24), color: '#ffd54f',
+      align: 'center'
+    }).setOrigin(0.5, compact ? 0.5 : 1);
 
     let startRequested = false;
     const startGame = () => {
