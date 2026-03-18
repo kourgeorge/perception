@@ -366,6 +366,7 @@ class InstructionsScene extends Phaser.Scene {
 
   init(data) {
     this.playerName = data.playerName ?? '';
+    this.playerAge = data.playerAge ?? '';
   }
 
   create() {
@@ -403,8 +404,8 @@ class InstructionsScene extends Phaser.Scene {
       y += t.height + 12;
     });
 
-    // Name input (optional); prefilled with a random name + number, user can change or clear
-    this.add.text(w / 2, h - 130, 'Your name (optional)', {
+    // Participant info inputs; name is optional, age is required.
+    this.add.text(w / 2, h - 170, 'Your name (optional)', {
       fontSize: 16, color: '#b0b0c0'
     }).setOrigin(0.5);
     const randomNameWithNumber = () => {
@@ -414,23 +415,47 @@ class InstructionsScene extends Phaser.Scene {
     };
     const defaultName = this.playerName || randomNameWithNumber();
     const inputStyle = 'width:220px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
-    const nameDom = this.add.dom(w / 2, h - 95).createFromHTML(
+    const ageInputStyle = 'width:120px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
+    const nameDom = this.add.dom(w / 2, h - 135).createFromHTML(
       '<input type="text" placeholder="Leave empty for random name" maxlength="24" value="' + defaultName + '" style="' + inputStyle + '">'
     );
     nameDom.setOrigin(0.5);
+    this.add.text(w / 2, h - 85, 'Age', {
+      fontSize: 16, color: '#b0b0c0'
+    }).setOrigin(0.5);
+    const defaultAge = this.playerAge === '' || this.playerAge == null ? '' : String(this.playerAge);
+    const ageDom = this.add.dom(w / 2, h - 50).createFromHTML(
+      '<input type="number" inputmode="numeric" min="1" max="120" step="1" required placeholder="Enter age" value="' + defaultAge + '" style="' + ageInputStyle + '">'
+    );
+    ageDom.setOrigin(0.5);
+    const ageErrorText = this.add.text(w / 2, h - 26, '', {
+      fontSize: 14, color: '#ff6666'
+    }).setOrigin(0.5).setVisible(false);
 
-    this.add.text(w / 2, h - 50, 'Press SPACE to start', {
+    this.add.text(w / 2, h + 8, 'Press SPACE to start', {
       fontSize: 20, color: '#ffd54f'
     }).setOrigin(0.5);
 
     const startGame = () => {
       const inputEl = nameDom.node && nameDom.node.tagName === 'INPUT' ? nameDom.node : (nameDom.node && nameDom.node.querySelector && nameDom.node.querySelector('input'));
+      const ageInputEl = ageDom.node && ageDom.node.tagName === 'INPUT' ? ageDom.node : (ageDom.node && ageDom.node.querySelector && ageDom.node.querySelector('input'));
       const rawName = inputEl ? (inputEl.value || '').trim() : '';
+      const rawAge = ageInputEl ? (ageInputEl.value || '').trim() : '';
+      const parsedAge = rawAge ? Number.parseInt(rawAge, 10) : null;
+      const age = Number.isInteger(parsedAge) && parsedAge >= 1 && parsedAge <= 120 ? parsedAge : null;
+      if (age === null) {
+        ageErrorText.setText('Age is required. Enter a number between 1 and 120.').setVisible(true);
+        if (ageInputEl && typeof ageInputEl.focus === 'function') ageInputEl.focus();
+        return;
+      }
       let name = rawName;
       if (!name) name = randomNameWithNumber();
       this.registry.set('lastPlayerName', name);
+      this.registry.set('lastPlayerAge', age);
+      ageErrorText.setVisible(false);
       if (nameDom.node) nameDom.node.style.display = 'none';
-      this.scene.start('Main', { blockIndex: 0, levelIndex: 0, totalScore: 0, playerName: name });
+      if (ageDom.node) ageDom.node.style.display = 'none';
+      this.scene.start('Main', { blockIndex: 0, levelIndex: 0, totalScore: 0, playerName: name, playerAge: age });
     };
     this.input.keyboard.once('keydown-SPACE', startGame);
   }
@@ -456,6 +481,7 @@ class MainScene extends Phaser.Scene {
     this.totalScore = data.totalScore ?? 0;
     this.levelIndex = data.levelIndex ?? 0;
     this.playerName = data.playerName ?? 'Player';
+    this.playerAge = data.playerAge ?? null;
   }
 
   create() {
@@ -478,13 +504,17 @@ class MainScene extends Phaser.Scene {
       const sessionId = generateSessionId();
       this.registry.set('gameLogSessionId', sessionId);
       this.registry.set('gameLogPlayerName', this.playerName);
+      this.registry.set('gameLogPlayerAge', this.playerAge);
       this.registry.set('gameLogSequence', 0);
       this.registry.set('gameLogEvents', []);
       gameLogEvent(this.registry, {
         event_type: 'session_start',
         timestamp_iso: new Date().toISOString(),
         session_id: sessionId,
-        player_name: this.playerName
+        player_name: this.playerName,
+        payload: {
+          player_age: this.playerAge
+        }
       });
     }
     const sid = this.registry.get('gameLogSessionId');
@@ -920,6 +950,7 @@ class MainScene extends Phaser.Scene {
     this.scene.start('GameOver', {
       score: finalScore,
       playerName: this.playerName,
+      playerAge: this.playerAge,
       reason: 'player_exit'
     });
   }
@@ -1072,7 +1103,8 @@ class MainScene extends Phaser.Scene {
           lives: p.lives,
           totalScore: this.totalScore,
           blocksConfig: this.blocksConfig,
-          playerName: this.playerName
+          playerName: this.playerName,
+          playerAge: this.playerAge
         });
         this.scene.pause();
       }
@@ -1107,7 +1139,8 @@ class MainScene extends Phaser.Scene {
           nextLevelTimeSec: getLevelTimeSec(this.levelIndex + 1),
           blocksConfig: this.blocksConfig,
           blockIndex: this.blockIndex,
-          playerName: this.playerName
+          playerName: this.playerName,
+          playerAge: this.playerAge
         });
         return;
       }
@@ -1137,7 +1170,8 @@ class MainScene extends Phaser.Scene {
         blocksConfig: this.blocksConfig,
         blockIndex: this.blockIndex,
         allPellets: true,
-        playerName: this.playerName
+        playerName: this.playerName,
+        playerAge: this.playerAge
       });
       return;
     }
@@ -1271,6 +1305,7 @@ class DeathScene extends Phaser.Scene {
     this.totalScore = data.totalScore ?? 0;
     this.blocksConfig = data.blocksConfig ?? [];
     this.playerName = data.playerName ?? 'Player';
+    this.playerAge = data.playerAge ?? null;
   }
 
   create() {
@@ -1286,7 +1321,7 @@ class DeathScene extends Phaser.Scene {
       this.input.keyboard.once('keydown-SPACE', () => {
         this.scene.stop('Death');
         if (this.lives <= 0) {
-          this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName });
+          this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
         } else {
           this.registry.set('resumedFromDeath', true);
           this.scene.resume('Main');
@@ -1309,6 +1344,7 @@ class LevelCompleteScene extends Phaser.Scene {
     this.blockIndex = data.blockIndex ?? 0;
     this.allPellets = data.allPellets ?? false;
     this.playerName = data.playerName ?? 'Player';
+    this.playerAge = data.playerAge ?? null;
   }
 
   create() {
@@ -1330,7 +1366,7 @@ class LevelCompleteScene extends Phaser.Scene {
     }
     this.input.keyboard.once('keydown-SPACE', () => {
       if (nextLevelIndex >= LEVEL_COUNT) {
-        this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName });
+        this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
       } else {
         const nextBlock = (this.blockIndex + 1) % this.blocksConfig.length;
         this.scene.start('Main', {
@@ -1338,7 +1374,8 @@ class LevelCompleteScene extends Phaser.Scene {
           blocksConfig: this.blocksConfig,
           totalScore: this.totalScore,
           levelIndex: nextLevelIndex,
-          playerName: this.playerName
+          playerName: this.playerName,
+          playerAge: this.playerAge
         });
       }
     });
@@ -1356,6 +1393,7 @@ class VictoryScene extends Phaser.Scene {
     this.totalScore = data.totalScore ?? data.score ?? 0;
     this.blocksConfig = data.blocksConfig ?? [];
     this.playerName = data.playerName ?? 'Player';
+    this.playerAge = data.playerAge ?? null;
   }
 
   create() {
@@ -1367,9 +1405,15 @@ class VictoryScene extends Phaser.Scene {
     this.add.text(w / 2, 280, 'Press SPACE to continue', { fontSize: 18, color: '#a0a0b0' }).setOrigin(0.5);
     this.input.keyboard.once('keydown-SPACE', () => {
       if (this.blockIndex < this.totalBlocks - 1)
-        this.scene.start('Main', { blockIndex: this.blockIndex + 1, blocksConfig: this.blocksConfig, totalScore: this.totalScore });
+        this.scene.start('Main', {
+          blockIndex: this.blockIndex + 1,
+          blocksConfig: this.blocksConfig,
+          totalScore: this.totalScore,
+          playerName: this.playerName,
+          playerAge: this.playerAge
+        });
       else
-        this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName });
+        this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
     });
   }
 }
@@ -1381,6 +1425,7 @@ class GameOverScene extends Phaser.Scene {
   init(data) {
     this.score = data.score ?? 0;
     this.playerName = data.playerName ?? 'Player';
+    this.playerAge = data.playerAge ?? null;
     this.reason = data.reason ?? 'completed';
   }
 
@@ -1395,13 +1440,14 @@ class GameOverScene extends Phaser.Scene {
     this.add.text(w / 2, 295, 'SPACE — Yes  |  Close tab to exit', { fontSize: 16, color: '#808090' }).setOrigin(0.5);
 
     this.input.keyboard.once('keydown-SPACE', () => {
-      this.scene.start('Instructions', { playerName: this.playerName });
+      this.scene.start('Instructions', { playerName: this.playerName, playerAge: this.playerAge });
     });
 
     // Flush session log to CSV and trigger download
     const events = this.registry.get('gameLogEvents');
     const sessionId = this.registry.get('gameLogSessionId');
     const playerName = this.registry.get('gameLogPlayerName') ?? this.playerName;
+    const playerAge = this.registry.get('gameLogPlayerAge') ?? this.playerAge;
     if (events && Array.isArray(events)) {
       gameLogEvent(this.registry, {
         event_type: 'session_end',
@@ -1409,7 +1455,10 @@ class GameOverScene extends Phaser.Scene {
         session_id: sessionId,
         player_name: playerName,
         total_score: this.score,
-        reason: this.reason
+        reason: this.reason,
+        payload: {
+          player_age: playerAge
+        }
       }, { keepalive: true, preferBeacon: true });
       uploadEntireSessionLog(this.registry, { keepalive: true, preferBeacon: true });
       const csv = buildSessionCsv(events);
@@ -1421,6 +1470,7 @@ class GameOverScene extends Phaser.Scene {
     }
     this.registry.remove('gameLogSessionId');
     this.registry.remove('gameLogPlayerName');
+    this.registry.remove('gameLogPlayerAge');
     this.registry.remove('gameLogEvents');
     this.registry.remove('gameLogSequence');
   }

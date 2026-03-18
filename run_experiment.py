@@ -42,7 +42,7 @@ def main() -> None:
     grid_config = GridConfig(cell_size=cell_size)
     pygame.init()
     screen = pygame.display.set_mode((grid_config.width_px, grid_config.height_px))
-    pygame.display.set_caption("Time Game - Foraging Task")
+    pygame.display.set_caption("Foraging Task")
     font = pygame.font.Font(None, 28)
     font_big = pygame.font.Font(None, 42)
 

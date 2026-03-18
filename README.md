@@ -1,4 +1,4 @@
-# Time Game – Pac-Man-Style Foraging Task
+# Pac-Man-Style Foraging Task
 
 A simplified Pac-Man-style foraging task for sampling subjective timing during navigation. Participants collect pellets in a 20×14 grid arena with three high-value "hot zones," avoid three ghosts, and respond to timing gates (teleport + 3s/5s lock with key-to-exit).
 
