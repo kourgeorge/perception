@@ -41,6 +41,223 @@ const RANDOM_NAMES = [
   'Forager', 'Speedy', 'Shadow', 'Bashful', 'Pokey', 'Ghost', 'Spirit'
 ];
 
+let phaserGameInstance = null;
+const mobileControlsState = {
+  initialized: false,
+  ownerSceneKey: null,
+  activeDirection: null,
+  justPressedDirection: null,
+  actionHandler: null,
+  showDpad: false,
+  showAction: false,
+  actionLabel: '',
+  elements: null
+};
+const introFormOverlayState = {
+  initialized: false,
+  elements: null,
+  cleanup: null
+};
+
+function prefersMobileControls() {
+  if (typeof window === 'undefined') return false;
+  const narrowViewport = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 900px)').matches
+    : window.innerWidth <= 900;
+  const coarsePointer = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(pointer: coarse)').matches
+    : false;
+  const touchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints || 0 : 0;
+  return narrowViewport || coarsePointer || touchPoints > 0;
+}
+
+function refreshGameScaleSoon() {
+  if (typeof window === 'undefined' || !window.requestAnimationFrame) return;
+  window.requestAnimationFrame(() => {
+    if (phaserGameInstance && phaserGameInstance.scale && typeof phaserGameInstance.scale.refresh === 'function') {
+      phaserGameInstance.scale.refresh();
+    }
+  });
+}
+
+function releaseMobileDirection() {
+  const state = mobileControlsState;
+  state.activeDirection = null;
+  state.justPressedDirection = null;
+  const buttons = state.elements && state.elements.directionButtons ? state.elements.directionButtons : [];
+  buttons.forEach((button) => button.classList.remove('is-active'));
+}
+
+function initMobileControls() {
+  if (mobileControlsState.initialized || typeof document === 'undefined') return;
+  const root = document.getElementById('mobile-controls');
+  const actionButton = document.getElementById('mobile-action-button');
+  if (!root || !actionButton) return;
+
+  const directionButtons = Array.from(root.querySelectorAll('[data-direction]'));
+  const state = mobileControlsState;
+  state.initialized = true;
+  state.elements = { root, actionButton, directionButtons };
+
+  directionButtons.forEach((button) => {
+    const direction = button.getAttribute('data-direction');
+    const startDirection = (event) => {
+      if (event) event.preventDefault();
+      if (!prefersMobileControls()) return;
+      releaseMobileDirection();
+      state.activeDirection = direction;
+      state.justPressedDirection = direction;
+      button.classList.add('is-active');
+    };
+    const stopDirection = (event) => {
+      if (event) event.preventDefault();
+      if (state.activeDirection === direction) state.activeDirection = null;
+      button.classList.remove('is-active');
+    };
+    button.addEventListener('pointerdown', startDirection);
+    button.addEventListener('pointerup', stopDirection);
+    button.addEventListener('pointercancel', stopDirection);
+    button.addEventListener('pointerleave', stopDirection);
+  });
+
+  actionButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (typeof state.actionHandler === 'function') state.actionHandler();
+  });
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerup', releaseMobileDirection);
+    window.addEventListener('blur', releaseMobileDirection);
+    window.addEventListener('resize', refreshGameScaleSoon);
+  }
+}
+
+function setMobileControls(sceneKey, options = {}) {
+  initMobileControls();
+  const state = mobileControlsState;
+  const elements = state.elements;
+  if (!elements) return;
+
+  const showDpad = options.showDpad === true;
+  const showAction = options.showAction === true;
+  const actionLabel = options.actionLabel ?? state.actionLabel ?? 'Continue';
+  const actionHandler = typeof options.onAction === 'function' ? options.onAction : null;
+  const enabled = prefersMobileControls() && (showDpad || showAction);
+  const shouldRefreshScale =
+    state.ownerSceneKey !== sceneKey ||
+    state.showDpad !== showDpad ||
+    state.showAction !== showAction ||
+    state.actionLabel !== actionLabel;
+
+  state.ownerSceneKey = sceneKey ?? null;
+  state.showDpad = showDpad;
+  state.showAction = showAction;
+  state.actionLabel = actionLabel;
+  state.actionHandler = actionHandler;
+
+  if (!showDpad) releaseMobileDirection();
+
+  elements.actionButton.textContent = actionLabel;
+  elements.actionButton.disabled = !actionHandler;
+  elements.root.classList.toggle('is-active', enabled);
+  elements.root.classList.toggle('show-dpad', enabled && showDpad);
+  elements.root.classList.toggle('show-action', enabled && showAction);
+  elements.root.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+
+  if (shouldRefreshScale) refreshGameScaleSoon();
+}
+
+function clearMobileControls(sceneKey) {
+  const state = mobileControlsState;
+  const elements = state.elements;
+  if (sceneKey && state.ownerSceneKey && state.ownerSceneKey !== sceneKey) return;
+  state.ownerSceneKey = null;
+  state.showDpad = false;
+  state.showAction = false;
+  state.actionHandler = null;
+  releaseMobileDirection();
+  if (!elements) return;
+  elements.actionButton.disabled = true;
+  elements.root.classList.remove('is-active', 'show-dpad', 'show-action');
+  elements.root.setAttribute('aria-hidden', 'true');
+  refreshGameScaleSoon();
+}
+
+function consumeMobileDirectionPress(direction) {
+  if (!prefersMobileControls()) return false;
+  if (mobileControlsState.justPressedDirection !== direction) return false;
+  mobileControlsState.justPressedDirection = null;
+  return true;
+}
+
+function isMobileDirectionHeld(direction) {
+  return prefersMobileControls() && mobileControlsState.activeDirection === direction;
+}
+
+function usesCompactScreenLayout() {
+  return prefersMobileControls();
+}
+
+function responsiveValue(desktopValue, compactValue) {
+  return usesCompactScreenLayout() ? compactValue : desktopValue;
+}
+
+function initIntroFormOverlay() {
+  if (introFormOverlayState.initialized || typeof document === 'undefined') return;
+  const root = document.getElementById('intro-form-overlay');
+  const nameInput = document.getElementById('intro-name-input');
+  const ageInput = document.getElementById('intro-age-input');
+  const error = document.getElementById('intro-form-error');
+  if (!root || !nameInput || !ageInput || !error) return;
+  introFormOverlayState.initialized = true;
+  introFormOverlayState.elements = { root, nameInput, ageInput, error };
+}
+
+function showIntroFormOverlay(options = {}) {
+  initIntroFormOverlay();
+  const elements = introFormOverlayState.elements;
+  if (!elements) return null;
+
+  const onSubmit = typeof options.onSubmit === 'function' ? options.onSubmit : null;
+  const defaultName = options.defaultName ?? '';
+  const defaultAge = options.defaultAge ?? '';
+  const handleEnter = (event) => {
+    if (event.key !== 'Enter' || !onSubmit) return;
+    event.preventDefault();
+    onSubmit();
+  };
+
+  hideIntroFormOverlay();
+
+  elements.nameInput.value = defaultName;
+  elements.ageInput.value = defaultAge;
+  elements.error.textContent = '';
+  elements.root.classList.add('is-visible');
+  elements.root.setAttribute('aria-hidden', 'false');
+  elements.nameInput.addEventListener('keydown', handleEnter);
+  elements.ageInput.addEventListener('keydown', handleEnter);
+
+  introFormOverlayState.cleanup = () => {
+    elements.nameInput.removeEventListener('keydown', handleEnter);
+    elements.ageInput.removeEventListener('keydown', handleEnter);
+  };
+
+  return elements;
+}
+
+function hideIntroFormOverlay() {
+  initIntroFormOverlay();
+  const elements = introFormOverlayState.elements;
+  if (introFormOverlayState.cleanup) {
+    introFormOverlayState.cleanup();
+    introFormOverlayState.cleanup = null;
+  }
+  if (!elements) return;
+  elements.error.textContent = '';
+  elements.root.classList.remove('is-visible');
+  elements.root.setAttribute('aria-hidden', 'true');
+}
+
 // ─── Session CSV logging (registry-backed; download at GameOver) ───────────
 const CSV_COLUMNS = ['event_id', 'event_seq', 'event_type', 'event_ts', 'session_id', 'player_name', 'level_index', 'score_total', 'lives_left', 'context_id', 'entity_type', 'entity_id', 'x', 'y', 'payload_json'];
 const BACKEND_LOG_ENDPOINT = '/api/logs/events';
@@ -371,80 +588,80 @@ class InstructionsScene extends Phaser.Scene {
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
+    const compact = usesCompactScreenLayout();
     const bg = this.add.graphics();
     bg.fillStyle(0x0d0d18, 1);
     bg.fillRect(0, 0, w, h);
 
-    const title = this.add.text(w / 2, 70, 'PAC-MAN FORAGING', {
-      fontSize: 28, color: '#ffd54f', fontFamily: 'Georgia, serif'
+    const title = this.add.text(w / 2, responsiveValue(70, 56), 'PAC-MAN FORAGING', {
+      fontSize: responsiveValue(28, 38), color: '#ffd54f', fontFamily: 'Georgia, serif'
     }).setOrigin(0.5);
-    const sub = this.add.text(w / 2, 105, 'Collect pellets. Avoid ghosts.', {
-      fontSize: 16, color: '#b0b0c0'
+    const sub = this.add.text(w / 2, responsiveValue(105, 96), 'Collect pellets. Avoid ghosts.', {
+      fontSize: responsiveValue(16, 22), color: '#b0b0c0'
     }).setOrigin(0.5);
-    this.backendStatusText = this.add.text(w / 2, 130, getBackendLoggingStatusLabel(), {
-      fontSize: 14,
+    this.backendStatusText = this.add.text(w / 2, responsiveValue(130, 126), getBackendLoggingStatusLabel(), {
+      fontSize: responsiveValue(14, 18),
       color: backendLogState.available === false ? '#ff6666' : '#7fd27f'
     }).setOrigin(0.5);
 
-    const lines = [
-      '↑↓←→ Move (or hold to move continuously)',
-      'Collect as many pellets as you can before time runs out',
-      '5 levels: Level 1 = 2 min, each level 20 sec less. Score adds up.',
-      'High-value zones (gold) worth more. Avoid ghosts (3 lives).',
-      'Freeze: entire screen pauses. Wait 5 or 10 sec (longer freezes more likely in high-value areas), then press SPACE to continue.',
-      'Pressing SPACE before the wait adds +2s penalty and keeps you in freeze. Clock turns red under 30s.'
-    ];
-    const wrapWidth = w - 60;
-    let y = 165;
+    const lines = compact
+      ? [
+          'Use arrows or the mobile pad to move.',
+          'Collect pellets before time runs out.',
+          'Five levels. Each one gets shorter.',
+          'Gold zones are worth more. Avoid ghosts.',
+          'Freeze: wait, then press SPACE or tap Continue.',
+          'Tapping early adds +2 seconds.'
+        ]
+      : [
+          '↑↓←→ Move, or use the mobile pad on touch screens',
+          'Collect as many pellets as you can before time runs out',
+          '5 levels: Level 1 = 2 min, each level 20 sec less. Score adds up.',
+          'High-value zones (gold) worth more. Avoid ghosts (3 lives).',
+          'Freeze: entire screen pauses. Wait 5 or 10 sec, then press SPACE or tap Continue.',
+          'Pressing SPACE or tapping too early adds +2s penalty and keeps you frozen. Clock turns red under 30s.'
+        ];
+    const wrapWidth = compact ? w - 140 : w - 60;
+    let y = compact ? 152 : 165;
     lines.forEach((line) => {
       const t = this.add.text(w / 2, y, line, {
-        fontSize: 15, color: '#c0c0d0', align: 'center',
-        wordWrap: { width: wrapWidth }, lineSpacing: 4
+        fontSize: responsiveValue(15, 20), color: '#c0c0d0', align: 'center',
+        wordWrap: { width: wrapWidth }, lineSpacing: compact ? 2 : 4
       }).setOrigin(0.5, 0);
-      y += t.height + 12;
+      y += t.height + (compact ? 8 : 12);
     });
 
-    // Participant info inputs; name is optional, age is required.
-    this.add.text(w / 2, h - 170, 'Your name (optional)', {
-      fontSize: 16, color: '#b0b0c0'
-    }).setOrigin(0.5);
     const randomNameWithNumber = () => {
       const base = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
       const num = 100 + Math.floor(Math.random() * 900); // 100–999
       return base + '_' + num;
     };
     const defaultName = this.playerName || randomNameWithNumber();
-    const inputStyle = 'width:220px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
-    const ageInputStyle = 'width:120px;padding:8px 12px;font-size:16px;text-align:center;background:#1a1525;color:#e0e0e0;border:2px solid #4a6ab8;border-radius:8px;outline:none;';
-    const nameDom = this.add.dom(w / 2, h - 135).createFromHTML(
-      '<input type="text" placeholder="Leave empty for random name" maxlength="24" value="' + defaultName + '" style="' + inputStyle + '">'
-    );
-    nameDom.setOrigin(0.5);
-    this.add.text(w / 2, h - 85, 'Age', {
-      fontSize: 16, color: '#b0b0c0'
-    }).setOrigin(0.5);
     const defaultAge = this.playerAge === '' || this.playerAge == null ? '' : String(this.playerAge);
-    const ageDom = this.add.dom(w / 2, h - 50).createFromHTML(
-      '<input type="number" inputmode="numeric" min="1" max="120" step="1" required placeholder="Enter age" value="' + defaultAge + '" style="' + ageInputStyle + '">'
-    );
-    ageDom.setOrigin(0.5);
-    const ageErrorText = this.add.text(w / 2, h - 26, '', {
-      fontSize: 14, color: '#ff6666'
-    }).setOrigin(0.5).setVisible(false);
+    const introForm = showIntroFormOverlay({
+      defaultName,
+      defaultAge,
+      onSubmit: () => startGame()
+    });
+    const inputEl = introForm ? introForm.nameInput : null;
+    const ageInputEl = introForm ? introForm.ageInput : null;
+    const ageErrorEl = introForm ? introForm.error : null;
 
-    this.add.text(w / 2, h + 8, 'Press SPACE to start', {
-      fontSize: 20, color: '#ffd54f'
-    }).setOrigin(0.5);
+    this.add.text(w / 2, h - responsiveValue(12, 18), 'Press SPACE or tap Start', {
+      fontSize: responsiveValue(20, 24), color: '#ffd54f'
+    }).setOrigin(0.5, 1);
 
+    let startRequested = false;
     const startGame = () => {
-      const inputEl = nameDom.node && nameDom.node.tagName === 'INPUT' ? nameDom.node : (nameDom.node && nameDom.node.querySelector && nameDom.node.querySelector('input'));
-      const ageInputEl = ageDom.node && ageDom.node.tagName === 'INPUT' ? ageDom.node : (ageDom.node && ageDom.node.querySelector && ageDom.node.querySelector('input'));
+      if (startRequested) return;
       const rawName = inputEl ? (inputEl.value || '').trim() : '';
       const rawAge = ageInputEl ? (ageInputEl.value || '').trim() : '';
       const parsedAge = rawAge ? Number.parseInt(rawAge, 10) : null;
       const age = Number.isInteger(parsedAge) && parsedAge >= 1 && parsedAge <= 120 ? parsedAge : null;
       if (age === null) {
-        ageErrorText.setText('Age is required. Enter a number between 1 and 120.').setVisible(true);
+        if (ageErrorEl) {
+          ageErrorEl.textContent = 'Age is required. Enter a number between 1 and 120.';
+        }
         if (ageInputEl && typeof ageInputEl.focus === 'function') ageInputEl.focus();
         return;
       }
@@ -452,12 +669,21 @@ class InstructionsScene extends Phaser.Scene {
       if (!name) name = randomNameWithNumber();
       this.registry.set('lastPlayerName', name);
       this.registry.set('lastPlayerAge', age);
-      ageErrorText.setVisible(false);
-      if (nameDom.node) nameDom.node.style.display = 'none';
-      if (ageDom.node) ageDom.node.style.display = 'none';
+      if (ageErrorEl) ageErrorEl.textContent = '';
+      startRequested = true;
+      hideIntroFormOverlay();
       this.scene.start('Main', { blockIndex: 0, levelIndex: 0, totalScore: 0, playerName: name, playerAge: age });
     };
     this.input.keyboard.once('keydown-SPACE', startGame);
+    setMobileControls(this.sys.settings.key, {
+      showAction: true,
+      actionLabel: 'Start game',
+      onAction: startGame
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      hideIntroFormOverlay();
+      clearMobileControls(this.sys.settings.key);
+    });
   }
 
   update() {
@@ -563,6 +789,8 @@ class MainScene extends Phaser.Scene {
     this.buildGhosts();
     this.buildHUD();
     this.buildFreezeHalo();
+    this.syncMobileControls();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
   }
 
   buildArena() {
@@ -749,6 +977,11 @@ class MainScene extends Phaser.Scene {
     this.freezeHalo.setVisible(false);
   }
 
+  syncMobileControls() {
+    if (this.scene.isActive('FreezeOverlay') || this.scene.isActive('Death')) return;
+    setMobileControls(this.sys.settings.key, { showDpad: true });
+  }
+
   drawFreezeHalo() {
     if (this.freezeInPlaceUntil <= 0) {
       this.freezeHalo.setVisible(false);
@@ -863,7 +1096,7 @@ class MainScene extends Phaser.Scene {
     };
   }
 
-  logArrowPress(eventType, dc, dr, outcome) {
+  logArrowPress(eventType, dc, dr, outcome, inputSource = 'keyboard') {
     const p = this.player;
     gameLogEvent(this.registry, {
       event_type: eventType,
@@ -886,6 +1119,7 @@ class MainScene extends Phaser.Scene {
         from_y: outcome.from_y,
         to_x: outcome.to_x,
         to_y: outcome.to_y,
+        input_source: inputSource,
         pellet_collected: outcome.pellet_collected,
         pellet_type: outcome.pellet_type,
         points_gained: outcome.points_gained
@@ -989,37 +1223,40 @@ class MainScene extends Phaser.Scene {
       this.registry.remove('resumedFromDeath');
       this.nextFreezeTime = this.time.now + FREEZE_INTERVAL_SEC * 1000 * (0.7 + 0.3 * Math.random());
     }
+    if (mobileControlsState.ownerSceneKey !== this.sys.settings.key && !this.scene.isActive('FreezeOverlay') && !this.scene.isActive('Death')) {
+      this.syncMobileControls();
+    }
 
     {
       // Player movement: discrete keypresses are logged; held input continues movement without extra press events.
       const p = this.player;
-      const justLeft = Phaser.Input.Keyboard.JustDown(this.cursors.left);
-      const justRight = Phaser.Input.Keyboard.JustDown(this.cursors.right);
-      const justUp = Phaser.Input.Keyboard.JustDown(this.cursors.up);
-      const justDown = Phaser.Input.Keyboard.JustDown(this.cursors.down);
+      const justLeft = Phaser.Input.Keyboard.JustDown(this.cursors.left) || consumeMobileDirectionPress('left');
+      const justRight = Phaser.Input.Keyboard.JustDown(this.cursors.right) || consumeMobileDirectionPress('right');
+      const justUp = Phaser.Input.Keyboard.JustDown(this.cursors.up) || consumeMobileDirectionPress('up');
+      const justDown = Phaser.Input.Keyboard.JustDown(this.cursors.down) || consumeMobileDirectionPress('down');
       const heldDelay = !p.frozen && !p.moving && (time - this.lastPlayerMove >= PLAYER_MOVE_DELAY_MS);
       if (justLeft) {
         this.lastPlayerMove = time;
-        this.logArrowPress('arrow_left_press', -1, 0, this.movePlayer(-1, 0));
+        this.logArrowPress('arrow_left_press', -1, 0, this.movePlayer(-1, 0), this.cursors.left.isDown ? 'keyboard' : 'touch');
       } else if (justRight) {
         this.lastPlayerMove = time;
-        this.logArrowPress('arrow_right_press', 1, 0, this.movePlayer(1, 0));
+        this.logArrowPress('arrow_right_press', 1, 0, this.movePlayer(1, 0), this.cursors.right.isDown ? 'keyboard' : 'touch');
       } else if (justUp) {
         this.lastPlayerMove = time;
-        this.logArrowPress('arrow_up_press', 0, -1, this.movePlayer(0, -1));
+        this.logArrowPress('arrow_up_press', 0, -1, this.movePlayer(0, -1), this.cursors.up.isDown ? 'keyboard' : 'touch');
       } else if (justDown) {
         this.lastPlayerMove = time;
-        this.logArrowPress('arrow_down_press', 0, 1, this.movePlayer(0, 1));
-      } else if (heldDelay && this.cursors.left.isDown) {
+        this.logArrowPress('arrow_down_press', 0, 1, this.movePlayer(0, 1), this.cursors.down.isDown ? 'keyboard' : 'touch');
+      } else if (heldDelay && (this.cursors.left.isDown || isMobileDirectionHeld('left'))) {
         this.lastPlayerMove = time;
         this.movePlayer(-1, 0);
-      } else if (heldDelay && this.cursors.right.isDown) {
+      } else if (heldDelay && (this.cursors.right.isDown || isMobileDirectionHeld('right'))) {
         this.lastPlayerMove = time;
         this.movePlayer(1, 0);
-      } else if (heldDelay && this.cursors.up.isDown) {
+      } else if (heldDelay && (this.cursors.up.isDown || isMobileDirectionHeld('up'))) {
         this.lastPlayerMove = time;
         this.movePlayer(0, -1);
-      } else if (heldDelay && this.cursors.down.isDown) {
+      } else if (heldDelay && (this.cursors.down.isDown || isMobileDirectionHeld('down'))) {
         this.lastPlayerMove = time;
         this.movePlayer(0, 1);
       }
@@ -1211,6 +1448,8 @@ class FreezeOverlayScene extends Phaser.Scene {
   create() {
     const w = this.cameras.main.width;
     const h = this.cameras.main.height;
+    const compact = usesCompactScreenLayout();
+    const centerY = compact ? h / 2 - 18 : h / 2;
     this.penaltySeconds = 0;
     this.pressCount = 0;
 
@@ -1220,24 +1459,86 @@ class FreezeOverlayScene extends Phaser.Scene {
     overlay.fillRect(0, 0, w, h);
 
     const totalSec = this.durationMs / 1000;
-    this.add.text(w / 2, h / 2 - 50, 'FREEZE', {
-      fontSize: 42, color: '#ffdd55', fontFamily: 'Georgia, serif'
+    this.add.text(w / 2, centerY - responsiveValue(50, 74), 'FREEZE', {
+      fontSize: responsiveValue(42, 54), color: '#ffdd55', fontFamily: 'Georgia, serif'
     }).setOrigin(0.5);
-    this.durationText = this.add.text(w / 2, h / 2 + 10, `Wait ${totalSec} sec, then press SPACE`, {
-      fontSize: 22, color: '#e0e0e0'
+    this.durationText = this.add.text(w / 2, centerY - responsiveValue(-10, 6), `Wait ${totalSec} sec, then press SPACE or tap Continue`, {
+      fontSize: responsiveValue(22, 28), color: '#e0e0e0',
+      align: 'center',
+      wordWrap: { width: compact ? w - 180 : w - 120 }
     }).setOrigin(0.5);
-    this.countdownText = this.add.text(w / 2, h / 2 + 55, '', {
-      fontSize: 22, color: '#b0b0c0'
+    this.countdownText = this.add.text(w / 2, centerY + responsiveValue(55, 54), '', {
+      fontSize: responsiveValue(22, 30), color: '#b0b0c0'
     }).setOrigin(0.5);
-    this.pressSpaceText = this.add.text(w / 2, h / 2 + 95, '', {
-      fontSize: 20, color: '#ffdd55'
+    this.pressSpaceText = this.add.text(w / 2, centerY + responsiveValue(95, 102), '', {
+      fontSize: responsiveValue(20, 24), color: '#ffdd55',
+      align: 'center',
+      wordWrap: { width: compact ? w - 180 : w - 120 }
     }).setOrigin(0.5);
-    this.earlyPenaltyText = this.add.text(w / 2, h / 2 + 130, '', {
-      fontSize: 18, color: '#ff6666'
+    this.earlyPenaltyText = this.add.text(w / 2, centerY + responsiveValue(130, 150), '', {
+      fontSize: responsiveValue(18, 20), color: '#ff6666',
+      align: 'center',
+      wordWrap: { width: compact ? w - 170 : w - 120 }
     }).setOrigin(0.5).setVisible(false);
 
     // ─── ONLY place that handles SPACE during freeze ─────────────────────────
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    setMobileControls(this.sys.settings.key, {
+      showAction: true,
+      actionLabel: 'Continue',
+      onAction: () => this.handleFreezeContinue()
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
+  }
+
+  handleFreezeContinue() {
+    const elapsed = this.time.now - this.freezeStartGameTime;
+    const requiredWaitMs = this.durationMs + this.penaltySeconds * 1000;
+    const pastThreshold = elapsed >= requiredWaitMs;
+    const penaltyBefore = this.penaltySeconds;
+    const penaltyAfter = pastThreshold ? penaltyBefore : penaltyBefore + PENALTY_PER_EARLY_TAP;
+
+    this.pressCount += 1;
+    gameLogEvent(this.registry, {
+      event_type: 'freeze_space_press',
+      level_index: this.levelIndex,
+      score_total: this.scoreTotalAtFreezeStart,
+      lives_left: this.livesLeft,
+      context_id: this.freezeContextId,
+      payload: {
+        press_index: this.pressCount,
+        elapsed_freeze_ms: Math.max(0, Math.round(elapsed)),
+        required_wait_ms: requiredWaitMs,
+        was_early: !pastThreshold,
+        penalty_seconds_before: penaltyBefore,
+        penalty_seconds_after: penaltyAfter,
+        unfreezes_game: pastThreshold
+      }
+    });
+
+    if (pastThreshold) {
+      gameLogEvent(this.registry, {
+        event_type: 'freeze_end',
+        level_index: this.levelIndex,
+        score_total: this.scoreTotalAtFreezeStart,
+        lives_left: this.livesLeft,
+        context_id: this.freezeContextId,
+        payload: {
+          planned_freeze_ms: this.durationMs,
+          actual_wait_ms: Math.max(0, Math.round(elapsed)),
+          final_penalty_seconds: this.penaltySeconds,
+          space_press_count: this.pressCount
+        }
+      });
+      if (this.penaltySeconds > 0) this.registry.set('freezePenaltySeconds', this.penaltySeconds);
+      this.registry.set('freezeJustEnded', true);
+      this.scene.stop('FreezeOverlay');
+      this.scene.resume('Main');
+      return;
+    }
+
+    this.penaltySeconds = penaltyAfter;
+    this.earlyPenaltyText.setText(`Too early! +${PENALTY_PER_EARLY_TAP}s penalty (total +${this.penaltySeconds}s). Wait longer.`).setVisible(true);
   }
 
   update(time) {
@@ -1251,48 +1552,11 @@ class FreezeOverlayScene extends Phaser.Scene {
 
     // ─── SPACE during freeze: only unfreeze after duration + all penalties have passed; else +2s penalty and stay frozen ───
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
-      const penaltyBefore = this.penaltySeconds;
-      const penaltyAfter = pastThreshold ? penaltyBefore : penaltyBefore + PENALTY_PER_EARLY_TAP;
-      this.pressCount += 1;
-      gameLogEvent(this.registry, {
-        event_type: 'freeze_space_press',
-        level_index: this.levelIndex,
-        score_total: this.scoreTotalAtFreezeStart,
-        lives_left: this.livesLeft,
-        context_id: this.freezeContextId,
-        payload: {
-          press_index: this.pressCount,
-          elapsed_freeze_ms: Math.max(0, Math.round(elapsed)),
-          required_wait_ms: requiredWaitMs,
-          was_early: !pastThreshold,
-          penalty_seconds_before: penaltyBefore,
-          penalty_seconds_after: penaltyAfter,
-          unfreezes_game: pastThreshold
-        }
-      });
-      if (pastThreshold) {
-        gameLogEvent(this.registry, {
-          event_type: 'freeze_end',
-          level_index: this.levelIndex,
-          score_total: this.scoreTotalAtFreezeStart,
-          lives_left: this.livesLeft,
-          context_id: this.freezeContextId,
-          payload: {
-            planned_freeze_ms: this.durationMs,
-            actual_wait_ms: Math.max(0, Math.round(elapsed)),
-            final_penalty_seconds: this.penaltySeconds,
-            space_press_count: this.pressCount
-          }
-        });
-        if (this.penaltySeconds > 0) this.registry.set('freezePenaltySeconds', this.penaltySeconds);
-        this.registry.set('freezeJustEnded', true);
-        this.scene.stop('FreezeOverlay');
-        this.scene.resume('Main');
-      } else {
-        this.penaltySeconds = penaltyAfter;
-        this.earlyPenaltyText.setText(`Too early! +${PENALTY_PER_EARLY_TAP}s penalty (total +${this.penaltySeconds}s). Wait longer.`).setVisible(true);
-      }
+      this.handleFreezeContinue();
     }
+
+    this.countdownText.setText(remainingSec > 0 ? `${remainingSec} sec remaining` : 'You can continue now');
+    this.pressSpaceText.setText(pastThreshold ? 'Press SPACE or tap Continue' : 'Wait until the countdown ends');
   }
 }
 
@@ -1310,24 +1574,43 @@ class DeathScene extends Phaser.Scene {
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
+    const compact = usesCompactScreenLayout();
+    const centerY = compact ? h / 2 - 12 : h / 2;
     const overlay = this.add.graphics();
     overlay.fillStyle(0x400000, 0.85);
     overlay.fillRect(0, 0, w, h);
-    this.add.text(w / 2, h / 2 - 30, 'You died!', { fontSize: 36, color: '#ff6666' }).setOrigin(0.5);
-    this.add.text(w / 2, h / 2 + 20, this.lives > 0 ? 'Lives left: ' + this.lives : 'No lives left!', { fontSize: 22, color: '#e0e0e0' }).setOrigin(0.5);
-    this.continueText = this.add.text(w / 2, h / 2 + 70, '', { fontSize: 18, color: '#ffaa66' }).setOrigin(0.5).setVisible(false);
+    this.add.text(w / 2, centerY - responsiveValue(30, 40), 'You died!', {
+      fontSize: responsiveValue(36, 46), color: '#ff6666'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, centerY + responsiveValue(20, 28), this.lives > 0 ? 'Lives left: ' + this.lives : 'No lives left!', {
+      fontSize: responsiveValue(22, 28), color: '#e0e0e0'
+    }).setOrigin(0.5);
+    this.continueText = this.add.text(w / 2, centerY + responsiveValue(70, 86), '', {
+      fontSize: responsiveValue(18, 22), color: '#ffaa66'
+    }).setOrigin(0.5).setVisible(false);
+    let continueEnabled = false;
+    const continueGame = () => {
+      if (!continueEnabled) return;
+      this.scene.stop('Death');
+      if (this.lives <= 0) {
+        this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
+      } else {
+        this.registry.set('resumedFromDeath', true);
+        this.scene.resume('Main');
+      }
+    };
+    setMobileControls(this.sys.settings.key, {});
     this.time.delayedCall(3000, () => {
-      this.continueText.setText('Press SPACE to continue').setVisible(true);
-      this.input.keyboard.once('keydown-SPACE', () => {
-        this.scene.stop('Death');
-        if (this.lives <= 0) {
-          this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
-        } else {
-          this.registry.set('resumedFromDeath', true);
-          this.scene.resume('Main');
-        }
+      continueEnabled = true;
+      this.continueText.setText('Press SPACE or tap Continue').setVisible(true);
+      this.input.keyboard.once('keydown-SPACE', continueGame);
+      setMobileControls(this.sys.settings.key, {
+        showAction: true,
+        actionLabel: 'Continue',
+        onAction: continueGame
       });
     });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
   }
 }
 
@@ -1349,22 +1632,26 @@ class LevelCompleteScene extends Phaser.Scene {
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
+    const compact = usesCompactScreenLayout();
     this.add.rectangle(0, 0, w, h, 0x0d0d18).setOrigin(0);
     const levelNum = this.levelIndex + 1;
     const title = this.allPellets ? 'All pellets collected!' : 'Time\'s up!';
-    this.add.text(w / 2, 70, 'Level ' + levelNum + ' complete', { fontSize: 22, color: '#b0b0c0' }).setOrigin(0.5);
-    this.add.text(w / 2, 115, title, { fontSize: 26, color: '#ffd54f' }).setOrigin(0.5);
-    this.add.text(w / 2, 175, 'This level: +' + this.levelScore + ' pts', { fontSize: 24, color: '#c0c0e0' }).setOrigin(0.5);
-    this.add.text(w / 2, 220, 'Total score: ' + this.totalScore, { fontSize: 24, color: '#ffd54f' }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(70, 82), 'Level ' + levelNum + ' complete', {
+      fontSize: responsiveValue(22, 28), color: '#b0b0c0'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(115, 136), title, {
+      fontSize: responsiveValue(26, 34), color: '#ffd54f',
+      align: 'center',
+      wordWrap: { width: compact ? w - 180 : w - 100 }
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(175, 214), 'This level: +' + this.levelScore + ' pts', {
+      fontSize: responsiveValue(24, 30), color: '#c0c0e0'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(220, 266), 'Total score: ' + this.totalScore, {
+      fontSize: responsiveValue(24, 30), color: '#ffd54f'
+    }).setOrigin(0.5);
     const nextLevelIndex = this.levelIndex + 1;
-    if (nextLevelIndex < LEVEL_COUNT) {
-      this.add.text(w / 2, 280, 'Next level: ' + this.nextLevelTimeSec + ' sec', { fontSize: 18, color: '#a0a0b0' }).setOrigin(0.5);
-      this.add.text(w / 2, h - 50, 'Press SPACE for next level', { fontSize: 18, color: '#ffd54f' }).setOrigin(0.5);
-    } else {
-      this.add.text(w / 2, 280, 'All 5 levels complete!', { fontSize: 18, color: '#a0a0b0' }).setOrigin(0.5);
-      this.add.text(w / 2, h - 50, 'Press SPACE to finish', { fontSize: 18, color: '#ffd54f' }).setOrigin(0.5);
-    }
-    this.input.keyboard.once('keydown-SPACE', () => {
+    const advanceLevel = () => {
       if (nextLevelIndex >= LEVEL_COUNT) {
         this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
       } else {
@@ -1378,7 +1665,29 @@ class LevelCompleteScene extends Phaser.Scene {
           playerAge: this.playerAge
         });
       }
+    };
+    if (nextLevelIndex < LEVEL_COUNT) {
+      this.add.text(w / 2, responsiveValue(280, 330), 'Next level: ' + this.nextLevelTimeSec + ' sec', {
+        fontSize: responsiveValue(18, 24), color: '#a0a0b0'
+      }).setOrigin(0.5);
+      this.add.text(w / 2, h - responsiveValue(50, 72), 'Press SPACE or tap Next level', {
+        fontSize: responsiveValue(18, 22), color: '#ffd54f'
+      }).setOrigin(0.5);
+    } else {
+      this.add.text(w / 2, responsiveValue(280, 330), 'All 5 levels complete!', {
+        fontSize: responsiveValue(18, 24), color: '#a0a0b0'
+      }).setOrigin(0.5);
+      this.add.text(w / 2, h - responsiveValue(50, 72), 'Press SPACE or tap Finish', {
+        fontSize: responsiveValue(18, 22), color: '#ffd54f'
+      }).setOrigin(0.5);
+    }
+    this.input.keyboard.once('keydown-SPACE', advanceLevel);
+    setMobileControls(this.sys.settings.key, {
+      showAction: true,
+      actionLabel: nextLevelIndex < LEVEL_COUNT ? 'Next level' : 'Finish',
+      onAction: advanceLevel
     });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
   }
 }
 
@@ -1398,12 +1707,20 @@ class VictoryScene extends Phaser.Scene {
 
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
+    const compact = usesCompactScreenLayout();
     this.add.rectangle(0, 0, w, h, 0x0d0d18).setOrigin(0);
-    this.add.text(w / 2, 90, 'All pellets collected!', { fontSize: 26, color: '#ffd54f' }).setOrigin(0.5);
-    this.add.text(w / 2, 140, 'Block complete', { fontSize: 18, color: '#b0b0c0' }).setOrigin(0.5);
-    this.add.text(w / 2, 200, 'Score: ' + this.score, { fontSize: 24, color: '#ffd54f' }).setOrigin(0.5);
-    this.add.text(w / 2, 280, 'Press SPACE to continue', { fontSize: 18, color: '#a0a0b0' }).setOrigin(0.5);
-    this.input.keyboard.once('keydown-SPACE', () => {
+    this.add.text(w / 2, responsiveValue(90, 104), 'All pellets collected!', {
+      fontSize: responsiveValue(26, 34), color: '#ffd54f',
+      align: 'center',
+      wordWrap: { width: compact ? w - 180 : w - 100 }
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(140, 166), 'Block complete', {
+      fontSize: responsiveValue(18, 24), color: '#b0b0c0'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(200, 244), 'Score: ' + this.score, {
+      fontSize: responsiveValue(24, 30), color: '#ffd54f'
+    }).setOrigin(0.5);
+    const continueVictory = () => {
       if (this.blockIndex < this.totalBlocks - 1)
         this.scene.start('Main', {
           blockIndex: this.blockIndex + 1,
@@ -1414,7 +1731,17 @@ class VictoryScene extends Phaser.Scene {
         });
       else
         this.scene.start('GameOver', { score: this.totalScore, playerName: this.playerName, playerAge: this.playerAge });
+    };
+    this.add.text(w / 2, responsiveValue(280, 330), 'Press SPACE or tap Continue', {
+      fontSize: responsiveValue(18, 22), color: '#a0a0b0'
+    }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', continueVictory);
+    setMobileControls(this.sys.settings.key, {
+      showAction: true,
+      actionLabel: 'Continue',
+      onAction: continueVictory
     });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
   }
 }
 
@@ -1432,16 +1759,40 @@ class GameOverScene extends Phaser.Scene {
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
     const endedEarly = this.reason === 'player_exit';
+    const compact = usesCompactScreenLayout();
     this.add.rectangle(0, 0, w, h, 0x0d0d18).setOrigin(0);
-    this.add.text(w / 2, 100, endedEarly ? 'Session ended early' : 'Session complete', { fontSize: 26, color: '#e0e0e0' }).setOrigin(0.5);
-    this.add.text(w / 2, 145, this.playerName + '!', { fontSize: 22, color: '#b0b0c0' }).setOrigin(0.5);
-    this.add.text(w / 2, 195, 'Total score: ' + this.score, { fontSize: 24, color: '#ffd54f' }).setOrigin(0.5);
-    this.add.text(w / 2, 260, 'Play again?', { fontSize: 20, color: '#b0b0c0' }).setOrigin(0.5);
-    this.add.text(w / 2, 295, 'SPACE — Yes  |  Close tab to exit', { fontSize: 16, color: '#808090' }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(100, 108), endedEarly ? 'Session ended early' : 'Session complete', {
+      fontSize: responsiveValue(26, 34), color: '#e0e0e0',
+      align: 'center',
+      wordWrap: { width: compact ? w - 180 : w - 120 }
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(145, 162), this.playerName + '!', {
+      fontSize: responsiveValue(22, 28), color: '#b0b0c0',
+      align: 'center',
+      wordWrap: { width: compact ? w - 200 : w - 160 }
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(195, 228), 'Total score: ' + this.score, {
+      fontSize: responsiveValue(24, 30), color: '#ffd54f'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(260, 306), 'Play again?', {
+      fontSize: responsiveValue(20, 24), color: '#b0b0c0'
+    }).setOrigin(0.5);
+    this.add.text(w / 2, responsiveValue(295, 354), compact ? 'Tap Play again below\nor close the tab to exit' : 'SPACE or tap Play again  |  Close tab to exit', {
+      fontSize: responsiveValue(16, 20), color: '#808090',
+      align: 'center',
+      lineSpacing: compact ? 8 : 0
+    }).setOrigin(0.5);
 
-    this.input.keyboard.once('keydown-SPACE', () => {
+    const restartSession = () => {
       this.scene.start('Instructions', { playerName: this.playerName, playerAge: this.playerAge });
+    };
+    this.input.keyboard.once('keydown-SPACE', restartSession);
+    setMobileControls(this.sys.settings.key, {
+      showAction: true,
+      actionLabel: 'Play again',
+      onAction: restartSession
     });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => clearMobileControls(this.sys.settings.key));
 
     // Flush session log to CSV and trigger download
     const events = this.registry.get('gameLogEvents');
@@ -1484,11 +1835,13 @@ const config = {
   parent: 'game-container',
   backgroundColor: 0x0d0d18,
   scale: {
-    mode: Phaser.Scale.NONE,
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
     width: COLS * CELL_SIZE,
     height: ROWS * CELL_SIZE + HUD_OFFSET_Y
   },
   dom: { createContainer: true },
   scene: [BootScene, InstructionsScene, MainScene, FreezeOverlayScene, DeathScene, LevelCompleteScene, VictoryScene, GameOverScene]
 };
-new Phaser.Game(config);
+initMobileControls();
+phaserGameInstance = new Phaser.Game(config);

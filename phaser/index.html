@@ -7,26 +7,245 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHBhdGggZmlsbD0iI0ZGREQwMCIgc3Ryb2tlPSIjRTZDMjAwIiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGQ9Ik0yNyAxMSBBMTIgMTIgMCAwIDEgNCAxNiBBMTIgMTIgMCAwIDEgMjcgMjEgTDE2IDE2IFoiLz48Y2lyY2xlIGN4PSIxNCIgY3k9IjEyIiByPSIyLjIiIGZpbGw9IiMyZDJkMmQiLz48Y2lyY2xlIGN4PSIxNC40IiBjeT0iMTEuNCIgcj0iMC41IiBmaWxsPSIjZmZmIi8+PC9zdmc+">
   <link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHBhdGggZmlsbD0iI0ZGREQwMCIgc3Ryb2tlPSIjRTZDMjAwIiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGQ9Ik0yNyAxMSBBMTIgMTIgMCAwIDEgNCAxNiBBMTIgMTIgMCAwIDEgMjcgMjEgTDE2IDE2IFoiLz48Y2lyY2xlIGN4PSIxNCIgY3k9IjEyIiByPSIyLjIiIGZpbGw9IiMyZDJkMmQiLz48Y2lyY2xlIGN4PSIxNC40IiBjeT0iMTEuNCIgcj0iMC41IiBmaWxsPSIjZmZmIi8+PC9zdmc+">
   <style>
-    * { margin: 0; padding: 0; }
+    :root {
+      color-scheme: dark;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      overflow: hidden;
+    }
     body {
-      background: #0a0a12;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      background:
+        radial-gradient(circle at top, rgba(74, 106, 184, 0.18), transparent 42%),
+        linear-gradient(180deg, #121326 0%, #080810 100%);
       min-height: 100vh;
       font-family: 'Segoe UI', system-ui, sans-serif;
     }
+    #app-shell {
+      width: 100%;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 16px;
+    }
     #game-container {
-      min-width: 800px;
-      min-height: 650px;
+      position: relative;
+      width: min(100%, 980px);
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(13, 13, 24, 0.72);
       box-shadow: 0 0 60px rgba(100, 80, 255, 0.15);
-      border-radius: 12px;
+      border-radius: 18px;
       overflow: hidden;
+      border: 1px solid rgba(120, 135, 255, 0.16);
+      backdrop-filter: blur(10px);
+    }
+    #game-container canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    #intro-form-overlay {
+      position: absolute;
+      left: 50%;
+      bottom: 78px;
+      transform: translateX(-50%);
+      width: min(320px, calc(100% - 32px));
+      display: none;
+      pointer-events: auto;
+      z-index: 3;
+    }
+    #intro-form-overlay.is-visible {
+      display: block;
+    }
+    .intro-form-card {
+      padding: 14px 16px 12px;
+      border-radius: 16px;
+      background: rgba(14, 15, 28, 0.92);
+      border: 1px solid rgba(120, 135, 255, 0.26);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
+    }
+    .intro-form-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      text-align: center;
+    }
+    .intro-form-label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      color: #b0b0c0;
+      font-size: 16px;
+    }
+    .intro-form-input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 16px;
+      text-align: center;
+      color: #e0e0e0;
+      background: #1a1525;
+      border: 2px solid #4a6ab8;
+      border-radius: 8px;
+      outline: none;
+    }
+    .intro-form-input:focus {
+      border-color: #7d9dff;
+      box-shadow: 0 0 0 3px rgba(77, 111, 200, 0.2);
+    }
+    .intro-form-error {
+      min-height: 18px;
+      color: #ff6666;
+      font-size: 14px;
+    }
+    #mobile-controls {
+      width: min(100%, 560px);
+      display: none;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      align-items: stretch;
+    }
+    #mobile-controls.is-active {
+      display: grid;
+    }
+    .mobile-dpad,
+    .mobile-action {
+      display: none;
+    }
+    #mobile-controls.show-dpad .mobile-dpad {
+      display: grid;
+    }
+    #mobile-controls.show-action .mobile-action {
+      display: flex;
+    }
+    .mobile-dpad {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+    .mobile-dpad-spacer {
+      visibility: hidden;
+      min-height: 60px;
+    }
+    .mobile-btn {
+      border: 1px solid rgba(126, 143, 255, 0.35);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(51, 58, 102, 0.92), rgba(23, 26, 49, 0.98));
+      color: #f4f6ff;
+      min-height: 60px;
+      padding: 12px;
+      font-size: 24px;
+      font-weight: 700;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+    }
+    .mobile-btn.is-active,
+    .mobile-btn:active {
+      transform: translateY(1px) scale(0.98);
+      background: linear-gradient(180deg, rgba(80, 95, 170, 0.95), rgba(33, 38, 73, 0.98));
+    }
+    .mobile-action {
+      align-items: stretch;
+    }
+    .mobile-action .mobile-btn {
+      width: 100%;
+      min-height: 100%;
+      font-size: 20px;
+      letter-spacing: 0.02em;
+      touch-action: manipulation;
+    }
+    .mobile-btn:disabled {
+      opacity: 0.5;
+    }
+    @media (pointer: coarse), (max-width: 900px) {
+      #app-shell {
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px;
+      }
+      #game-container {
+        width: 100%;
+        max-width: 560px;
+        max-height: calc(100dvh - 132px);
+      }
+      #intro-form-overlay {
+        bottom: 64px;
+        width: min(320px, calc(100% - 20px));
+      }
+      .intro-form-card {
+        padding: 12px;
+        border-radius: 14px;
+      }
+      .intro-form-label {
+        font-size: 15px;
+      }
+      .intro-form-input {
+        padding: 9px 10px;
+      }
+      #mobile-controls {
+        width: min(100%, 420px);
+        gap: 10px;
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-height: 760px) {
+      #app-shell {
+        gap: 10px;
+      }
+      .mobile-btn {
+        min-height: 52px;
+        border-radius: 14px;
+        font-size: 22px;
+      }
     }
   </style>
 </head>
 <body>
-  <div id="game-container"></div>
+  <div id="app-shell">
+    <div id="game-container">
+      <div id="intro-form-overlay" aria-hidden="true">
+        <div class="intro-form-card">
+          <div class="intro-form-fields">
+            <label class="intro-form-label">
+              <span>Your name (optional)</span>
+              <input id="intro-name-input" class="intro-form-input" type="text" placeholder="Leave empty for random name" maxlength="24">
+            </label>
+            <label class="intro-form-label">
+              <span>Age</span>
+              <input id="intro-age-input" class="intro-form-input" type="number" inputmode="numeric" min="1" max="120" step="1" required placeholder="Enter age">
+            </label>
+            <div id="intro-form-error" class="intro-form-error"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="mobile-controls" aria-hidden="true">
+      <div class="mobile-dpad" aria-label="Movement controls">
+        <div class="mobile-dpad-spacer"></div>
+        <button class="mobile-btn" data-direction="up" aria-label="Move up">↑</button>
+        <div class="mobile-dpad-spacer"></div>
+        <button class="mobile-btn" data-direction="left" aria-label="Move left">←</button>
+        <button class="mobile-btn" data-direction="down" aria-label="Move down">↓</button>
+        <button class="mobile-btn" data-direction="right" aria-label="Move right">→</button>
+      </div>
+      <div class="mobile-action">
+        <button id="mobile-action-button" class="mobile-btn" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
   <div id="error-msg" style="display:none; color:#ff6666; padding:20px; text-align:center;">Error loading game. Check console (F12).</div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script>
