@@ -54,10 +54,12 @@
       max-width: 100%;
       max-height: 100%;
     }
+    /* Position (top) is set from JS so the form stays aligned with Phaser text at any scale */
     #intro-form-overlay {
       position: absolute;
       left: 50%;
-      bottom: 78px;
+      top: 0;
+      bottom: auto;
       transform: translateX(-50%);
       width: min(320px, calc(100% - 32px));
       display: none;
@@ -211,7 +213,6 @@
         max-height: calc(100dvh - 132px);
       }
       #intro-form-overlay {
-        bottom: 16px;
         width: min(310px, calc(100% - 18px));
       }
       .intro-form-card {

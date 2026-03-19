@@ -307,6 +307,61 @@ function hideIntroFormOverlay() {
   elements.error.textContent = '';
   elements.root.classList.remove('is-visible');
   elements.root.setAttribute('aria-hidden', 'true');
+  elements.root.style.top = '';
+  elements.root.style.bottom = '';
+  elements.root.style.transform = '';
+}
+
+/** Map FIT-scaled canvas: game Y (px in game space) → distance from #game-container top to that row (CSS px). */
+function getInstructionsGameViewportInContainer(scene) {
+  const container = typeof document !== 'undefined' ? document.getElementById('game-container') : null;
+  const canvas = scene && scene.sys && scene.sys.game ? scene.sys.game.canvas : null;
+  if (!container || !canvas) return null;
+  const gameW = scene.scale.gameSize.width;
+  const gameH = scene.scale.gameSize.height;
+  const canvasRect = canvas.getBoundingClientRect();
+  const contRect = container.getBoundingClientRect();
+  const s = Math.min(canvasRect.width / gameW, canvasRect.height / gameH);
+  const drawnW = gameW * s;
+  const drawnH = gameH * s;
+  const padX = (canvasRect.width - drawnW) / 2;
+  const padY = (canvasRect.height - drawnH) / 2;
+  return {
+    gameW,
+    gameH,
+    scale: s,
+    originX: canvasRect.left - contRect.left + padX,
+    originY: canvasRect.top - contRect.top + padY
+  };
+}
+
+/**
+ * Place the intro form so its top aligns with game Y (below instruction text).
+ * Returns form height in game units for positioning Phaser text below the card.
+ */
+function layoutIntroFormOverlay(scene, gameYTop) {
+  const elements = introFormOverlayState.elements;
+  const container = typeof document !== 'undefined' ? document.getElementById('game-container') : null;
+  if (!elements || !container || !elements.root.classList.contains('is-visible')) return null;
+  const vp = getInstructionsGameViewportInContainer(scene);
+  if (!vp) return null;
+  const root = elements.root;
+  const topPx = vp.originY + gameYTop * vp.scale;
+  root.style.left = '50%';
+  root.style.right = 'auto';
+  root.style.bottom = 'auto';
+  root.style.top = `${Math.round(topPx)}px`;
+  root.style.transform = 'translateX(-50%)';
+  const h = root.getBoundingClientRect().height;
+  const formHeightGame = h / vp.scale;
+  return { formHeightGame, vp };
+}
+
+function syncInstructionsIntroLayout(scene, formStartY, gapAfterForm) {
+  if (!scene || !scene.introPromptText) return;
+  const r = layoutIntroFormOverlay(scene, formStartY);
+  if (!r) return;
+  scene.introPromptText.setY(formStartY + r.formHeightGame + gapAfterForm);
 }
 
 // ─── Session logging (registry-backed; flushed to backend at GameOver) ─────
@@ -610,7 +665,6 @@ class InstructionsScene extends Phaser.Scene {
   create() {
     const w = this.cameras.main.width, h = this.cameras.main.height;
     const compact = usesCompactScreenLayout();
-    const compactPromptY = h - 158;
     const bg = this.add.graphics();
     bg.fillStyle(0x0d0d18, 1);
     bg.fillRect(0, 0, w, h);
@@ -653,6 +707,11 @@ class InstructionsScene extends Phaser.Scene {
       y += t.height + (compact ? 6 : 12);
     });
 
+    const formStartY = y + (compact ? 8 : 14);
+    const gapAfterForm = compact ? 10 : 14;
+    this._introFormStartY = formStartY;
+    this._introGapAfterForm = gapAfterForm;
+
     const randomNameWithNumber = () => {
       const base = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
       const num = 100 + Math.floor(Math.random() * 900); // 100–999
@@ -669,10 +728,28 @@ class InstructionsScene extends Phaser.Scene {
     const ageInputEl = introForm ? introForm.ageInput : null;
     const ageErrorEl = introForm ? introForm.error : null;
 
-    this.add.text(w / 2, compact ? compactPromptY : h - 12, 'Press SPACE or tap Start', {
+    this.introPromptText = this.add.text(w / 2, formStartY + 120, 'Press SPACE or tap Start', {
       fontSize: responsiveValue(20, 24), color: '#ffd54f',
       align: 'center'
-    }).setOrigin(0.5, compact ? 0.5 : 1);
+    }).setOrigin(0.5, 0);
+
+    const scheduleIntroLayout = () => {
+      if (!this.scene || !this.scene.isActive()) return;
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          syncInstructionsIntroLayout(this, this._introFormStartY, this._introGapAfterForm);
+        });
+      });
+    };
+    this._instructionsResizeHandler = scheduleIntroLayout;
+    scheduleIntroLayout();
+    this.time.delayedCall(50, scheduleIntroLayout);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', this._instructionsResizeHandler);
+    }
+    if (this.scale && typeof this.scale.on === 'function') {
+      this.scale.on(Phaser.Scale.Events.RESIZE, this._instructionsResizeHandler);
+    }
 
     let startRequested = false;
     const startGame = () => {
@@ -706,6 +783,14 @@ class InstructionsScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       hideIntroFormOverlay();
       clearMobileControls(this.sys.settings.key);
+      if (typeof window !== 'undefined' && this._instructionsResizeHandler) {
+        window.removeEventListener('resize', this._instructionsResizeHandler);
+      }
+      if (this.scale && this._instructionsResizeHandler && typeof this.scale.off === 'function') {
+        this.scale.off(Phaser.Scale.Events.RESIZE, this._instructionsResizeHandler);
+      }
+      this._instructionsResizeHandler = null;
+      this.introPromptText = null;
     });
   }
 
@@ -1103,7 +1188,7 @@ class MainScene extends Phaser.Scene {
           level_score_after: p.score
         }
       });
-      this.addCollectEffect(nc, nr, type, points);
+      if (type === HIGH_VALUE) this.addCollectEffect(nc, nr, type, points);
     }
     return {
       moved: true,

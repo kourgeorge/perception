@@ -5,6 +5,8 @@ __pycache__/
 dist/
 build/
 logs/*.json
+logs/*.csv
+logs/*.sqlite
 .Python
 venv/
 .env
