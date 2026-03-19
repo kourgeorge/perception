@@ -1103,7 +1103,7 @@ class MainScene extends Phaser.Scene {
           level_score_after: p.score
         }
       });
-      this.addCollectEffect(nc, nr, type);
+      this.addCollectEffect(nc, nr, type, points);
     }
     return {
       moved: true,
@@ -1150,20 +1150,43 @@ class MainScene extends Phaser.Scene {
     });
   }
 
-  addCollectEffect(col, row, type) {
+  addCollectEffect(col, row, type, points) {
     const [x, y0] = cellToPixel(col, row);
     const y = y0 + (this.hudOffsetY ?? HUD_OFFSET_Y);
-    const g = this.add.graphics();
-    g.setPosition(x, y);
-    g.fillStyle(type === HIGH_VALUE ? 0xffb347 : 0x9090a0, 0.9);
-    g.fillCircle(0, 0, 6);
+    const compact = usesCompactScreenLayout();
+    const isHigh = type === HIGH_VALUE;
+    const color = isHigh ? 0xffb347 : 0x9090a0;
+    const label = isHigh ? `GOLD +${points}` : `PELLET +${points}`;
+    const detail = isHigh ? 'high value' : 'low value';
+    const effect = this.add.container(x, y);
+    const burst = this.add.graphics();
+    burst.fillStyle(color, isHigh ? 0.35 : 0.28);
+    burst.lineStyle(isHigh ? 3 : 2, color, 0.95);
+    burst.fillCircle(0, 0, isHigh ? 12 : 8);
+    burst.strokeCircle(0, 0, isHigh ? 14 : 10);
+    const labelText = this.add.text(0, isHigh ? -18 : -16, label, {
+      fontSize: compact ? (isHigh ? 16 : 13) : (isHigh ? 20 : 16),
+      fontFamily: 'Georgia, serif',
+      color: isHigh ? '#ffd36b' : '#d5d7df',
+      stroke: '#0d0d18',
+      strokeThickness: 3
+    }).setOrigin(0.5);
+    const detailText = this.add.text(0, compact ? 4 : 6, detail, {
+      fontSize: compact ? 10 : 12,
+      fontFamily: 'Arial',
+      color: isHigh ? '#fff2bf' : '#b7b9c5',
+      stroke: '#0d0d18',
+      strokeThickness: 2
+    }).setOrigin(0.5);
+    effect.add([burst, labelText, detailText]);
     this.tweens.add({
-      targets: g,
+      targets: effect,
+      y: y - (isHigh ? 28 : 22),
       alpha: 0,
-      scale: 2.5,
-      duration: 250,
-      ease: 'Power2',
-      onComplete: () => g.destroy()
+      scale: isHigh ? 1.18 : 1.08,
+      duration: isHigh ? 700 : 520,
+      ease: 'Cubic.Out',
+      onComplete: () => effect.destroy()
     });
   }
 
