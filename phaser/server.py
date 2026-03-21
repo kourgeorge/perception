@@ -381,7 +381,7 @@ def parse_args() -> argparse.Namespace:
     project_dir = script_dir.parent
     parser = argparse.ArgumentParser(description="Serve Phaser and persist server-side logs.")
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", default=8080, type=int)
+    parser.add_argument("--port", default=8081, type=int)
     parser.add_argument("--log-dir", default=str(project_dir / "logs"))
     return parser.parse_args()
 
